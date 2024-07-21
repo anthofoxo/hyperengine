@@ -8,13 +8,50 @@
 #include <optional>
 #include <vector>
 #include <fstream>
+#include <format>
 
-std::optional<std::vector<char>> readFile(char const* path) {
+#include <renderdoc_app.h>
+
+RENDERDOC_API_1_0_0* kRenderDoc = nullptr;
+
+#ifdef _WIN32
+
+#include <Windows.h>
+#include <shlobj_core.h>
+
+void setupRenderdoc() {
+	HMODULE library = GetModuleHandleA("renderdoc.dll");
+	if (library == nullptr) {
+		CHAR pf[MAX_PATH];
+		SHGetSpecialFolderPathA(nullptr, pf, CSIDL_PROGRAM_FILES, false);
+		library = LoadLibraryA(std::format("{}/RenderDoc/renderdoc.dll", pf).c_str());
+	}
+	if (library == nullptr) return;
+
+	pRENDERDOC_GetAPI getApi = (pRENDERDOC_GetAPI)GetProcAddress(library, "RENDERDOC_GetAPI");
+	if (getApi == nullptr) return;
+	getApi(eRENDERDOC_API_Version_1_0_0, (void**)&kRenderDoc);
+}
+#else
+#include <dlfcn.h>
+
+void setupRenderdoc() {
+	void* library = dlopen("librenderdoc.so", RTLD_NOW | RTLD_NOLOAD);
+	if (library == nullptr) library = dlopen("librenderdoc.so", RTLD_NOW);
+	if (library == nullptr) return;
+
+	pRENDERDOC_GetAPI getApi = (pRENDERDOC_GetAPI)dlsym(library, "RENDERDOC_GetAPI");
+	if (getApi == nullptr) return;
+	getApi(eRENDERDOC_API_Version_1_0_0, (void**)&kRenderDoc);
+}
+#endif
+
+std::optional<std::string> readFile(char const* path) {
 	std::ifstream file;
 	file.open(path, std::ios::in | std::ios::binary);
 	if (!file) return std::nullopt;
 
-	std::vector<char> content;
+	std::string content;
 	file.seekg(0, std::ios::end);
 	auto size = file.tellg();
 	content.resize(size);
@@ -24,11 +61,40 @@ std::optional<std::vector<char>> readFile(char const* path) {
 	return content;
 }
 
+char const* vertHeader = R"(#version 330 core
+#define HE_VERT
+#define INPUT(type, name, index) layout(location = index) in type name
+#define OUTPUT(type, name, index)
+#define UNIFORM(type, name) uniform type name
+#line 1
+)";
+
+char const* fragHeader = R"(#version 330 core
+#define HE_FRAG
+#define INPUT(type, name, index)
+#define OUTPUT(type, name, index) layout(location = index) out type name
+#define UNIFORM(type, name) uniform type name
+#define MAX(a, b) a > b ? a : b
+#line 1
+)";
+
 int main(int argc, char* argv[]) {
+	setupRenderdoc();
+
+	if (kRenderDoc) {
+		kRenderDoc->MaskOverlayBits(eRENDERDOC_Overlay_None, eRENDERDOC_Overlay_None);
+	}
+
 	if (hyperengine::isWsl())
 		glfwInitHint(GLFW_PLATFORM, GLFW_PLATFORM_X11);
 
 	glfwInit();
+
+	glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
+	glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
+	glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
+	glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GLFW_TRUE);
+
 	GLFWwindow* window = glfwCreateWindow(1280, 720, "HyperEngine", nullptr, nullptr);
 
 	glfwMakeContextCurrent(window);
@@ -54,13 +120,15 @@ int main(int argc, char* argv[]) {
 	glEnableVertexAttribArray(0);
 	glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 2 * sizeof(float), (void const*)(uintptr_t)0);
 
-	auto vertSource = readFile("shader.vert.glsl");
-	auto fragSource = readFile("shader.frag.glsl");
+	auto shader = readFile("shader.glsl");
 
-	char const* vertSourcePtr = vertSource.value().data();
-	int vertSourceSize = vertSource.value().size();
-	char const* fragSourcePtr = fragSource.value().data();
-	int fragSourceSize = fragSource.value().size();
+	auto vertSource = std::string(vertHeader) + shader.value();
+	auto fragSource = std::string(fragHeader) + shader.value();
+
+	char const* vertSourcePtr = vertSource.data();
+	int vertSourceSize = vertSource.size();
+	char const* fragSourcePtr = fragSource.data();
+	int fragSourceSize = fragSource.size();
 
 	GLuint vert = glCreateShader(GL_VERTEX_SHADER);
 	GLuint frag = glCreateShader(GL_FRAGMENT_SHADER);

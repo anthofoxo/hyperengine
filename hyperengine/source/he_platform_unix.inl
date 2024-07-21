@@ -1,5 +1,6 @@
 #include <string_view>
 #include <cstdio>
+#include <format>
 
 #include <sys/utsname.h>
 
