@@ -1,14 +1,5 @@
-#include "he_platform.hpp"
-
-#ifdef _WIN32
-#	include <Windows.h>
-#	include <shlobj_core.h>
-#else
-#	include <dlfcn.h>
-#endif
-
-#include <GLFW/glfw3.h>
 #include <glad/gl.h>
+#include <GLFW/glfw3.h>
 
 #include <string>
 #include <iostream>
@@ -17,14 +8,14 @@
 #include <fstream>
 #include <format>
 
-#include <renderdoc_app.h>
 #include <debug-trap.h>
 
 #include <glm/glm.hpp>
 #include <glm/gtc/type_ptr.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 
-RENDERDOC_API_1_0_0* kRenderDoc = nullptr;
+#include "he_platform.hpp"
+#include "he_rdoc.hpp"
 
 GLuint makeShader(GLenum type, GLchar const* string, GLint length) {
 	GLuint shader = glCreateShader(type);
@@ -66,32 +57,6 @@ GLuint makeProgram(GLuint vert, GLuint frag) {
 
 	return program;
 }
-
-#ifdef _WIN32
-void setupRenderdoc() {
-	HMODULE library = GetModuleHandleA("renderdoc.dll");
-	if (library == nullptr) {
-		CHAR pf[MAX_PATH];
-		SHGetSpecialFolderPathA(nullptr, pf, CSIDL_PROGRAM_FILES, false);
-		library = LoadLibraryA(std::format("{}/RenderDoc/renderdoc.dll", pf).c_str());
-	}
-	if (library == nullptr) return;
-
-	pRENDERDOC_GetAPI getApi = (pRENDERDOC_GetAPI)GetProcAddress(library, "RENDERDOC_GetAPI");
-	if (getApi == nullptr) return;
-	getApi(eRENDERDOC_API_Version_1_0_0, (void**)&kRenderDoc);
-}
-#else
-void setupRenderdoc() {
-	void* library = dlopen("librenderdoc.so", RTLD_NOW | RTLD_NOLOAD);
-	if (library == nullptr) library = dlopen("librenderdoc.so", RTLD_NOW);
-	if (library == nullptr) return;
-
-	pRENDERDOC_GetAPI getApi = (pRENDERDOC_GetAPI)dlsym(library, "RENDERDOC_GetAPI");
-	if (getApi == nullptr) return;
-	getApi(eRENDERDOC_API_Version_1_0_0, (void**)&kRenderDoc);
-}
-#endif
 
 std::optional<std::string> readFile(char const* path) {
 	std::ifstream file;
@@ -166,12 +131,7 @@ void message_callback(GLenum source, GLenum type, GLuint id, GLenum severity, GL
 }
 
 int main(int argc, char* argv[]) {
-	setupRenderdoc();
-
-	if (kRenderDoc) {
-		kRenderDoc->MaskOverlayBits(eRENDERDOC_Overlay_None, eRENDERDOC_Overlay_None);
-		kRenderDoc->SetCaptureOptionU32(eRENDERDOC_Option_DebugOutputMute, 0);
-	}
+	hyperengine::setupRenderDoc(true);
 
 	if (hyperengine::isWsl())
 		glfwInitHint(GLFW_PLATFORM, GLFW_PLATFORM_X11);
@@ -267,6 +227,7 @@ int main(int argc, char* argv[]) {
 	glDeleteBuffers(1, &vbo);
 	glDeleteProgram(program);
 
+	glfwMakeContextCurrent(nullptr);
 	glfwDestroyWindow(window);
 	glfwTerminate();
     return 0;
