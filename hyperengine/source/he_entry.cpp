@@ -1,5 +1,12 @@
 #include "he_platform.hpp"
 
+#ifdef _WIN32
+#	include <Windows.h>
+#	include <shlobj_core.h>
+#else
+#	include <dlfcn.h>
+#endif
+
 #include <GLFW/glfw3.h>
 #include <glad/gl.h>
 
@@ -19,11 +26,48 @@
 
 RENDERDOC_API_1_0_0* kRenderDoc = nullptr;
 
+GLuint makeShader(GLenum type, GLchar const* string, GLint length) {
+	GLuint shader = glCreateShader(type);
+	glShaderSource(shader, 1, &string, &length);
+	glCompileShader(shader);
+
+	GLint param;
+	glGetShaderiv(shader, GL_INFO_LOG_LENGTH, &param);
+
+	if (param > 0) {
+		std::string error;
+		error.resize(param);
+		glGetShaderInfoLog(shader, param, nullptr, error.data());
+		std::cerr << error << '\n';
+		psnip_trap();
+	}
+
+	return shader;
+}
+
+GLuint makeProgram(GLuint vert, GLuint frag) {
+	GLuint program = glCreateProgram();
+	glAttachShader(program, vert);
+	glAttachShader(program, frag);
+	glLinkProgram(program);
+	glDetachShader(program, vert);
+	glDetachShader(program, frag);
+
+	GLint param;
+	glGetProgramiv(program, GL_INFO_LOG_LENGTH, &param);
+
+	if (param > 0) {
+		std::string error;
+		error.resize(param);
+		glGetProgramInfoLog(program, param, nullptr, error.data());
+		std::cerr << error << '\n';
+		psnip_trap();
+	}
+
+	return program;
+}
+
 #ifdef _WIN32
-
-#include <Windows.h>
-#include <shlobj_core.h>
-
 void setupRenderdoc() {
 	HMODULE library = GetModuleHandleA("renderdoc.dll");
 	if (library == nullptr) {
@@ -38,8 +82,6 @@ void setupRenderdoc() {
 	getApi(eRENDERDOC_API_Version_1_0_0, (void**)&kRenderDoc);
 }
 #else
-#include <dlfcn.h>
-
 void setupRenderdoc() {
 	void* library = dlopen("librenderdoc.so", RTLD_NOW | RTLD_NOLOAD);
 	if (library == nullptr) library = dlopen("librenderdoc.so", RTLD_NOW);
@@ -178,59 +220,13 @@ int main(int argc, char* argv[]) {
 	auto vertSource = std::string(vertHeader) + shader.value();
 	auto fragSource = std::string(fragHeader) + shader.value();
 
-	char const* vertSourcePtr = vertSource.data();
-	int vertSourceSize = vertSource.size();
-	char const* fragSourcePtr = fragSource.data();
-	int fragSourceSize = fragSource.size();
+	GLuint vert = makeShader(GL_VERTEX_SHADER, vertSource.data(), static_cast<int>(vertSource.size()));
+	GLuint frag = makeShader(GL_FRAGMENT_SHADER, fragSource.data(), static_cast<int>(fragSource.size()));
 
-	GLuint vert = glCreateShader(GL_VERTEX_SHADER);
-	GLuint frag = glCreateShader(GL_FRAGMENT_SHADER);
-
-	glShaderSource(vert, 1, &vertSourcePtr, &vertSourceSize);
-	glShaderSource(frag, 1, &fragSourcePtr, &fragSourceSize);
-
-	glCompileShader(vert);
-	glCompileShader(frag);
-	
-	GLint param;
-	glGetShaderiv(vert, GL_INFO_LOG_LENGTH, &param);
-
-	if (param > 0) {
-		std::string error;
-		error.resize(param);
-		glGetShaderInfoLog(vert, param, nullptr, error.data());
-		std::cerr << error << '\n';
-	}
-
-	GLint param2;
-	glGetShaderiv(frag, GL_INFO_LOG_LENGTH, &param2);
-
-	if (param2 > 0) {
-		std::string error;
-		error.resize(param2);
-		glGetShaderInfoLog(frag, param2, nullptr, error.data());
-		std::cerr << error << '\n';
-	}
-
-	GLuint program = glCreateProgram();
-	glAttachShader(program, vert);
-	glAttachShader(program, frag);
-	glLinkProgram(program);
-	glDetachShader(program, vert);
-	glDetachShader(program, frag);
+	GLuint program = makeProgram(vert, frag);
 
 	glDeleteShader(vert);
 	glDeleteShader(frag);
-
-	GLint param3;
-	glGetProgramiv(program, GL_INFO_LOG_LENGTH, &param3);
-
-	if (param3 > 0) {
-		std::string error;
-		error.resize(param3);
-		glGetProgramInfoLog(program, param3, nullptr, error.data());
-		std::cerr << error << '\n';
-	}
 
 	while (!glfwWindowShouldClose(window)) {
 		glfwPollEvents();
