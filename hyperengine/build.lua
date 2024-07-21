@@ -19,6 +19,7 @@ includedirs {
     "%{prj.location}/vendor",
     "%{wks.location}/vendor/glfw/include",
     "%{wks.location}/vendor/glad/include",
+    "%{wks.location}/vendor/glm",
 }
 
 links { "glfw", "glad" }

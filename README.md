@@ -18,3 +18,4 @@ Run `premake5 vs2022` to generate a visual studio solution. This should build ou
 ## Dependencies
 * [GLFW 3.4](https://github.com/glfw/glfw/tree/3.4)
 * [Glad 3.3+](https://gen.glad.sh/#generator=c&api=gl%3D3.3&profile=gl%3Dcore%2Cgles1%3Dcommon&extensions=GL_KHR_debug)
+* [glm](https://github.com/g-truc/glm/tree/1.0.1)
