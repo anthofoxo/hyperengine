@@ -1,6 +1,7 @@
 #include "he_platform.hpp"
 
 #include <GLFW/glfw3.h>
+#include <glad/gl.h>
 
 int main(int argc, char* argv[]) {
 	if (hyperengine::isWsl())
@@ -9,8 +10,12 @@ int main(int argc, char* argv[]) {
 	glfwInit();
 	GLFWwindow* window = glfwCreateWindow(1280, 720, "HyperEngine", nullptr, nullptr);
 
+	glfwMakeContextCurrent(window);
+	gladLoadGL(&glfwGetProcAddress);
+
 	while (!glfwWindowShouldClose(window)) {
 		glfwPollEvents();
+		glfwSwapBuffers(window);
 	}
 
 	glfwDestroyWindow(window);
