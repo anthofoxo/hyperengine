@@ -18,9 +18,10 @@ includedirs {
     "%{prj.location}/source",
     "%{prj.location}/vendor",
     "%{wks.location}/vendor/glfw/include",
+    "%{wks.location}/vendor/glad/include",
 }
 
-links { "glfw" }
+links { "glfw", "glad" }
 
 filter "system:windows"
 files "%{prj.location}/*.rc"
