@@ -14,6 +14,9 @@
 #include <glm/gtc/type_ptr.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 
+#define STB_IMAGE_IMPLEMENTATION
+#include <stb_image.h>
+
 #include "he_platform.hpp"
 #include "he_rdoc.hpp"
 
@@ -74,17 +77,19 @@ std::optional<std::string> readFile(char const* path) {
 }
 
 char const* vertHeader = R"(#version 330 core
-#define HE_VERT
+#define VERT
 #define INPUT(type, name, index) layout(location = index) in type name
 #define OUTPUT(type, name, index)
+#define VARYING(type, name) out type name
 #define UNIFORM(type, name) uniform type name
 #line 1
 )";
 
 char const* fragHeader = R"(#version 330 core
-#define HE_FRAG
+#define FRAG
 #define INPUT(type, name, index)
 #define OUTPUT(type, name, index) layout(location = index) out type name
+#define VARYING(type, name) in type name
 #define UNIFORM(type, name) uniform type name
 #line 1
 )";
@@ -188,6 +193,22 @@ int main(int argc, char* argv[]) {
 	glDeleteShader(vert);
 	glDeleteShader(frag);
 
+	int x, y;
+	stbi_uc* pixels = stbi_load("texture.png", &x, &y, nullptr, 4);
+
+	assert(pixels);
+
+	GLuint texture;
+	glGenTextures(1, &texture);
+	glBindTexture(GL_TEXTURE_2D, texture);
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, x, y, 0, GL_RGBA, GL_UNSIGNED_BYTE, pixels);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+
+	stbi_image_free(pixels);
+
 	while (!glfwWindowShouldClose(window)) {
 		glfwPollEvents();
 
@@ -199,6 +220,8 @@ int main(int argc, char* argv[]) {
 
 			glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
 			glBindVertexArray(vao);
+			glActiveTexture(GL_TEXTURE0 + 0);
+			glBindTexture(GL_TEXTURE_2D, texture);
 			glUseProgram(program);
 
 			glm::mat4 projection = glm::perspective(glm::radians(80.0f), static_cast<float>(width) / static_cast<float>(height), 0.1f, 100.0f);
@@ -223,6 +246,7 @@ int main(int argc, char* argv[]) {
 		}
 	}
 
+	glDeleteTextures(1, &texture);
 	glDeleteVertexArrays(1, &vao);
 	glDeleteBuffers(1, &vbo);
 	glDeleteProgram(program);
