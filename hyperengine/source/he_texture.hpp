@@ -4,15 +4,24 @@
 #include <utility>
 
 namespace hyperengine {
+	enum struct PixelFormat {
+		kRgba8
+	};
+
 	class Texture final {
 	public:
 		struct CreateInfo final {
-			GLint internalFormat;
 			GLsizei width, height;
-			GLenum format, type;
-			void const* pixels;
+			PixelFormat format;
 			GLenum minFilter, magFilter;
 			GLenum wrap;
+		};
+
+		struct UploadInfo final {
+			GLint xoffset, yoffset;
+			GLsizei width, height;
+			PixelFormat format;
+			void const* pixels;
 		};
 
 		constexpr Texture() noexcept = default;
@@ -23,6 +32,7 @@ namespace hyperengine {
 		Texture& operator=(Texture&& other) noexcept;
 		~Texture() noexcept;
 
+		void upload(UploadInfo const& info);
 		void bind(GLuint unit);
 	private:
 		GLuint mHandle = 0;

@@ -203,16 +203,22 @@ int main(int argc, char* argv[]) {
 
 	if (pixels) {
 		texture = {{
-				.internalFormat = GL_RGBA8,
 				.width = x,
 				.height = y,
-				.format = GL_RGBA,
-				.type = GL_UNSIGNED_BYTE,
-				.pixels = pixels,
+				.format = hyperengine::PixelFormat::kRgba8,
 				.minFilter = GL_LINEAR,
 				.magFilter = GL_LINEAR,
 				.wrap = GL_CLAMP_TO_EDGE
 			}};
+
+		texture.upload({
+				.xoffset = 0,
+				.yoffset = 0,
+				.width = x,
+				.height = y,
+				.format = hyperengine::PixelFormat::kRgba8,
+				.pixels = pixels
+			});
 	}
 
 	stbi_image_free(pixels);
