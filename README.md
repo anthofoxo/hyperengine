@@ -39,3 +39,4 @@ See shader sources in `./working` for examples.
 * [Glad 3.3+](https://gen.glad.sh/#generator=c&api=gl%3D3.3&profile=gl%3Dcore%2Cgles1%3Dcommon&extensions=GL_ARB_direct_state_access%2CGL_ARB_texture_storage%2CGL_KHR_debug)
 * [glm 1.0.1](https://github.com/g-truc/glm/tree/1.0.1)
 * [ImGui v1.90.9-docking](https://github.com/ocornut/imgui/tree/v1.90.9-docking)
+* [assimp](https://github.com/assimp/assimp/tree/v5.0.1)

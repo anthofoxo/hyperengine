@@ -48,3 +48,4 @@ end
 group ""
 
 include "hyperengine/build.lua"
+include "meshconverter/build.lua"

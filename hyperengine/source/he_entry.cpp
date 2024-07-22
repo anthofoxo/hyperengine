@@ -166,6 +166,64 @@ void message_callback(GLenum source, GLenum type, GLuint id, GLenum severity, GL
 	psnip_trap();
 }
 
+void loadMesh(GLuint& vao, GLuint& vbo, GLuint& ebo, GLsizei& count, GLenum& type, char const* file) {
+	std::vector<char> modelData = readFileBinary("varoom.hemesh").value();
+
+	struct Header {
+		char bytes[16];
+	} header;
+
+	char* ptr = modelData.data();
+	memcpy(&header, ptr, 16);
+	ptr += 16;
+
+	uint32_t numverts;
+	memcpy(&numverts, ptr, 4);
+	ptr += 4;
+
+	std::vector<Vertex> vertices;
+	vertices.resize(numverts);
+	memcpy(vertices.data(), ptr, numverts * sizeof(Vertex));
+	ptr += numverts * sizeof(Vertex);
+
+	uint32_t numelements;
+	memcpy(&numelements, ptr, 4);
+	ptr += 4;
+
+	unsigned int elementwidth;
+	if (vertices.size() < std::numeric_limits<uint8_t>::max()) elementwidth = 1;
+	else if (vertices.size() < std::numeric_limits<uint16_t>::max()) elementwidth = 2;
+	else elementwidth = 4;
+
+	std::vector<uint8_t> elements;
+	elements.resize(numelements * elementwidth);
+	memcpy(elements.data(), ptr, elements.size());
+
+	glGenVertexArrays(1, &vao);
+	glBindVertexArray(vao);
+
+	glGenBuffers(1, &vbo);
+	glBindBuffer(GL_ARRAY_BUFFER, vbo);
+	glBufferData(GL_ARRAY_BUFFER, vertices.size() * sizeof(decltype(vertices)::value_type), vertices.data(), GL_STATIC_DRAW);
+
+	glGenBuffers(1, &ebo);
+	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ebo);
+	glBufferData(GL_ELEMENT_ARRAY_BUFFER, elements.size() * sizeof(decltype(elements)::value_type), elements.data(), GL_STATIC_DRAW);
+
+	glEnableVertexAttribArray(0);
+	glEnableVertexAttribArray(1);
+	glEnableVertexAttribArray(2);
+	glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(Vertex), (void const*)(uintptr_t)offsetof(Vertex, position));
+	glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, sizeof(Vertex), (void const*)(uintptr_t)offsetof(Vertex, normal));
+	glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, sizeof(Vertex), (void const*)(uintptr_t)offsetof(Vertex, uv));
+
+	count = numelements;
+
+	if (elementwidth == 1) type = GL_UNSIGNED_BYTE;
+	else if (elementwidth == 2) type = GL_UNSIGNED_SHORT;
+	else type = GL_UNSIGNED_INT;
+}
+
 int main(int argc, char* argv[]) {
 	hyperengine::setupRenderDoc(true);
 
@@ -205,50 +263,9 @@ int main(int argc, char* argv[]) {
 	glClearColor(0.7f, 0.8f, 0.9f, 1.0f);
 
 	GLuint vao, vbo, ebo;
-
-	std::vector<char> modelData = readFileBinary("varoom.hemesh").value();
-
-	struct Header {
-		char bytes[16];
-	} header;
-
-	char* ptr = modelData.data();
-	memcpy(&header, ptr, 16);
-	ptr += 16;
-
-	uint32_t numverts;
-	memcpy(&numverts, ptr, 4);
-	ptr += 4;
-
-	std::vector<Vertex> vertices;
-	vertices.resize(numverts);
-	memcpy(vertices.data(), ptr, numverts * sizeof(Vertex));
-	ptr += numverts * sizeof(Vertex);
-
-	uint32_t numelements;
-	memcpy(&numelements, ptr, 4);
-	ptr += 4;
-
-	std::vector<uint32_t> elements;
-	elements.resize(numelements);
-	memcpy(elements.data(), ptr, numelements * sizeof(uint32_t));
-
-	glGenVertexArrays(1, &vao);
-	glBindVertexArray(vao);
-	glGenBuffers(1, &vbo);
-	glBindBuffer(GL_ARRAY_BUFFER, vbo);
-	glBufferData(GL_ARRAY_BUFFER, vertices.size() * sizeof(decltype(vertices)::value_type), vertices.data(), GL_STATIC_DRAW);
-
-	glGenBuffers(1, &ebo);
-	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ebo);
-	glBufferData(GL_ELEMENT_ARRAY_BUFFER, elements.size() * sizeof(decltype(elements)::value_type), elements.data(), GL_STATIC_DRAW);
-
-	glEnableVertexAttribArray(0);
-	glEnableVertexAttribArray(1);
-	glEnableVertexAttribArray(2);
-	glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(Vertex), (void const*)(uintptr_t)offsetof(Vertex, position));
-	glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, sizeof(Vertex), (void const*)(uintptr_t)offsetof(Vertex, normal));
-	glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, sizeof(Vertex), (void const*)(uintptr_t)offsetof(Vertex, uv));
+	GLsizei count;
+	GLenum type;
+	loadMesh(vao, vbo, ebo, count, type, "varoom.hemesh");
 
 	auto shader = readFile("shader.glsl");
 
@@ -337,7 +354,7 @@ int main(int argc, char* argv[]) {
 			location = glGetUniformLocation(program, "uView");
 			glUniformMatrix4fv(location, 1, GL_FALSE, glm::value_ptr(glm::inverse(camera)));
 
-			glDrawElements(GL_TRIANGLES, numelements, GL_UNSIGNED_INT, nullptr);
+			glDrawElements(GL_TRIANGLES, count, type, nullptr);
 
 			ImGui::Render();
 			ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
