@@ -19,6 +19,7 @@
 
 #include "he_platform.hpp"
 #include "he_rdoc.hpp"
+#include "he_texture.hpp"
 
 GLuint makeShader(GLenum type, GLchar const* string, GLint length) {
 	GLuint shader = glCreateShader(type);
@@ -93,6 +94,8 @@ char const* fragHeader = R"(#version 330 core
 #define UNIFORM(type, name) uniform type name
 #line 1
 )";
+
+
 
 void message_callback(GLenum source, GLenum type, GLuint id, GLenum severity, GLsizei length, GLchar const* message, void const* user_param) {
 	auto const src_str = [source]() {
@@ -193,19 +196,24 @@ int main(int argc, char* argv[]) {
 	glDeleteShader(vert);
 	glDeleteShader(frag);
 
+	hyperengine::Texture texture;
+
 	int x, y;
 	stbi_uc* pixels = stbi_load("texture.png", &x, &y, nullptr, 4);
 
-	assert(pixels);
-
-	GLuint texture;
-	glGenTextures(1, &texture);
-	glBindTexture(GL_TEXTURE_2D, texture);
-	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, x, y, 0, GL_RGBA, GL_UNSIGNED_BYTE, pixels);
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+	if (pixels) {
+		texture = {{
+				.internalFormat = GL_RGBA8,
+				.width = x,
+				.height = y,
+				.format = GL_RGBA,
+				.type = GL_UNSIGNED_BYTE,
+				.pixels = pixels,
+				.minFilter = GL_LINEAR,
+				.magFilter = GL_LINEAR,
+				.wrap = GL_CLAMP_TO_EDGE
+			}};
+	}
 
 	stbi_image_free(pixels);
 
@@ -220,8 +228,7 @@ int main(int argc, char* argv[]) {
 
 			glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
 			glBindVertexArray(vao);
-			glActiveTexture(GL_TEXTURE0 + 0);
-			glBindTexture(GL_TEXTURE_2D, texture);
+			texture.bind(0);
 			glUseProgram(program);
 
 			glm::mat4 projection = glm::perspective(glm::radians(80.0f), static_cast<float>(width) / static_cast<float>(height), 0.1f, 100.0f);
@@ -246,7 +253,10 @@ int main(int argc, char* argv[]) {
 		}
 	}
 
-	glDeleteTextures(1, &texture);
+	// Have to manually dealloacte this,
+	// the window would be destroyed before the destructor would run
+	texture = {};
+
 	glDeleteVertexArrays(1, &vao);
 	glDeleteBuffers(1, &vbo);
 	glDeleteProgram(program);
