@@ -36,5 +36,5 @@ See shader sources in `./working` for examples.
 * [debug-trap](https://github.com/nemequ/portable-snippets/blob/84abba93ff3d52c87e08ba81de1cc6615a42b72e/debug-trap/debug-trap.h)
 ### From submodules
 * [GLFW 3.4](https://github.com/glfw/glfw/tree/3.4)
-* [Glad 3.3+](https://gen.glad.sh/#generator=c&api=gl%3D3.3&profile=gl%3Dcore%2Cgles1%3Dcommon&extensions=GL_KHR_debug)
+* [Glad 3.3+](https://gen.glad.sh/#generator=c&api=gl%3D3.3&profile=gl%3Dcore%2Cgles1%3Dcommon&extensions=GL_ARB_direct_state_access%2CGL_ARB_texture_storage%2CGL_KHR_debug)
 * [glm 1.0.1](https://github.com/g-truc/glm/tree/1.0.1)

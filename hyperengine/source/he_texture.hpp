@@ -2,6 +2,7 @@
 
 #include <glad/gl.h>
 #include <utility>
+#include <string_view>
 
 namespace hyperengine {
 	enum struct PixelFormat {
@@ -15,6 +16,7 @@ namespace hyperengine {
 			PixelFormat format;
 			GLenum minFilter, magFilter;
 			GLenum wrap;
+			std::string_view label;
 		};
 
 		struct UploadInfo final {

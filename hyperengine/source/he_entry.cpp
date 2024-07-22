@@ -156,6 +156,10 @@ int main(int argc, char* argv[]) {
 	glfwMakeContextCurrent(window);
 	gladLoadGL(&glfwGetProcAddress);
 
+	if (GLAD_GL_KHR_debug) std::cout << "KHR_debug\n";
+	if (GLAD_GL_ARB_texture_storage) std::cout << "ARB_texture_storage\n";
+	if (GLAD_GL_ARB_texture_storage) std::cout << "ARB_direct_state_access\n";
+
 	if (GLAD_GL_KHR_debug) {
 		glEnable(GL_DEBUG_OUTPUT);
 		glEnable(GL_DEBUG_OUTPUT_SYNCHRONOUS);
