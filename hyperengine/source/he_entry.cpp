@@ -8,7 +8,7 @@
 #include <fstream>
 #include <format>
 
-#include <debug-trap.h>
+#include <debug_trap.h>
 
 #include <glm/glm.hpp>
 #include <glm/gtc/type_ptr.hpp>
@@ -17,7 +17,7 @@
 #define STB_IMAGE_IMPLEMENTATION
 #include <stb_image.h>
 
-#include "he_platform.hpp"
+#include "he_window.hpp"
 #include "he_rdoc.hpp"
 #include "he_texture.hpp"
 
@@ -141,19 +141,9 @@ void message_callback(GLenum source, GLenum type, GLuint id, GLenum severity, GL
 int main(int argc, char* argv[]) {
 	hyperengine::setupRenderDoc(true);
 
-	if (hyperengine::isWsl())
-		glfwInitHint(GLFW_PLATFORM, GLFW_PLATFORM_X11);
+	hyperengine::Window window{{ .width = 1280, .height = 720, .title = "HyperEngine" }};
 
-	glfwInit();
-
-	glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
-	glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
-	glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
-	glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GLFW_TRUE);
-
-	GLFWwindow* window = glfwCreateWindow(1280, 720, "HyperEngine", nullptr, nullptr);
-
-	glfwMakeContextCurrent(window);
+	glfwMakeContextCurrent(window.handle());
 	gladLoadGL(&glfwGetProcAddress);
 
 	if (GLAD_GL_KHR_debug) std::cout << "KHR_debug\n";
@@ -227,11 +217,11 @@ int main(int argc, char* argv[]) {
 
 	stbi_image_free(pixels);
 
-	while (!glfwWindowShouldClose(window)) {
+	while (!glfwWindowShouldClose(window.handle())) {
 		glfwPollEvents();
 
 		int width, height;
-		glfwGetFramebufferSize(window, &width, &height);
+		glfwGetFramebufferSize(window.handle(), &width, &height);
 		
 		if (width > 0 && height > 0) {
 			glViewport(0, 0, width, height);
@@ -259,20 +249,13 @@ int main(int argc, char* argv[]) {
 			glUniformMatrix4fv(location, 1, GL_FALSE, glm::value_ptr(glm::inverse(camera)));
 
 			glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
-			glfwSwapBuffers(window);
+			glfwSwapBuffers(window.handle());
 		}
 	}
-
-	// Have to manually dealloacte this,
-	// the window would be destroyed before the destructor would run
-	texture = {};
 
 	glDeleteVertexArrays(1, &vao);
 	glDeleteBuffers(1, &vbo);
 	glDeleteProgram(program);
 
-	glfwMakeContextCurrent(nullptr);
-	glfwDestroyWindow(window);
-	glfwTerminate();
     return 0;
 }

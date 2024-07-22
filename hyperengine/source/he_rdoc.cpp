@@ -12,7 +12,7 @@
 #include <renderdoc_app.h>
 
 namespace {
-	RENDERDOC_API_1_0_0* kApi = nullptr;
+	RENDERDOC_API_1_0_0* gApi = nullptr;
 
 	void loadSharedLibrary(bool load) {
 #ifdef _WIN32
@@ -26,7 +26,7 @@ namespace {
 
 		pRENDERDOC_GetAPI getApi = (pRENDERDOC_GetAPI)GetProcAddress(library, "RENDERDOC_GetAPI");
 		if (getApi == nullptr) return;
-		getApi(eRENDERDOC_API_Version_1_0_0, (void**)&kApi);
+		getApi(eRENDERDOC_API_Version_1_0_0, (void**)&gApi);
 #else
 		void* library = dlopen("librenderdoc.so", RTLD_NOW | RTLD_NOLOAD);
 		if (load && library == nullptr) library = dlopen("librenderdoc.so", RTLD_NOW);
@@ -34,7 +34,7 @@ namespace {
 
 		pRENDERDOC_GetAPI getApi = (pRENDERDOC_GetAPI)dlsym(library, "RENDERDOC_GetAPI");
 		if (getApi == nullptr) return;
-		getApi(eRENDERDOC_API_Version_1_0_0, (void**)&kApi);
+		getApi(eRENDERDOC_API_Version_1_0_0, (void**)&gApi);
 #endif
 	}
 }
@@ -42,9 +42,9 @@ namespace {
 namespace hyperengine {
 	void setupRenderDoc(bool load) {
 		loadSharedLibrary(load);
-		if (!kApi) return;
+		if (!gApi) return;
 
-		kApi->MaskOverlayBits(eRENDERDOC_Overlay_None, eRENDERDOC_Overlay_None);
-		kApi->SetCaptureOptionU32(eRENDERDOC_Option_DebugOutputMute, 0);
+		gApi->MaskOverlayBits(eRENDERDOC_Overlay_None, eRENDERDOC_Overlay_None);
+		gApi->SetCaptureOptionU32(eRENDERDOC_Option_DebugOutputMute, 0);
 	}
 }
