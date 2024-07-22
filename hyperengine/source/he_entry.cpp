@@ -85,6 +85,28 @@ std::optional<std::string> readFile(char const* path) {
 	return content;
 }
 
+
+std::optional<std::vector<char>> readFileBinary(char const* path) {
+	std::ifstream file;
+	file.open(path, std::ios::in | std::ios::binary);
+	if (!file) return std::nullopt;
+
+	std::vector<char> content;
+	file.seekg(0, std::ios::end);
+	auto size = file.tellg();
+	content.resize(size);
+	file.seekg(0, std::ios::beg);
+	file.read(content.data(), content.size());
+	file.close();
+	return content;
+}
+
+struct Vertex {
+	glm::vec3 position;
+	glm::vec3 normal;
+	glm::vec2 uv;
+};
+
 char const* vertHeader = R"(#version 330 core
 #define VERT
 #define INPUT(type, name, index) layout(location = index) in type name
@@ -102,8 +124,6 @@ char const* fragHeader = R"(#version 330 core
 #define UNIFORM(type, name) uniform type name
 #line 1
 )";
-
-
 
 void message_callback(GLenum source, GLenum type, GLuint id, GLenum severity, GLsizei length, GLchar const* message, void const* user_param) {
 	auto const src_str = [source]() {
@@ -184,23 +204,51 @@ int main(int argc, char* argv[]) {
 
 	glClearColor(0.7f, 0.8f, 0.9f, 1.0f);
 
-	GLuint vao, vbo;
+	GLuint vao, vbo, ebo;
 
-	GLfloat data[] = {
-		-1.0f, 1.0f,
-		-1.0f, -1.0f,
-		1.0f, 1.0f,
-		1.0f, -1.0f,
-	};
+	std::vector<char> modelData = readFileBinary("varoom.hemesh").value();
+
+	struct Header {
+		char bytes[16];
+	} header;
+
+	char* ptr = modelData.data();
+	memcpy(&header, ptr, 16);
+	ptr += 16;
+
+	uint32_t numverts;
+	memcpy(&numverts, ptr, 4);
+	ptr += 4;
+
+	std::vector<Vertex> vertices;
+	vertices.resize(numverts);
+	memcpy(vertices.data(), ptr, numverts * sizeof(Vertex));
+	ptr += numverts * sizeof(Vertex);
+
+	uint32_t numelements;
+	memcpy(&numelements, ptr, 4);
+	ptr += 4;
+
+	std::vector<uint32_t> elements;
+	elements.resize(numelements);
+	memcpy(elements.data(), ptr, numelements * sizeof(uint32_t));
 
 	glGenVertexArrays(1, &vao);
 	glBindVertexArray(vao);
 	glGenBuffers(1, &vbo);
 	glBindBuffer(GL_ARRAY_BUFFER, vbo);
-	glBufferData(GL_ARRAY_BUFFER, sizeof data, data, GL_STATIC_DRAW);
+	glBufferData(GL_ARRAY_BUFFER, vertices.size() * sizeof(decltype(vertices)::value_type), vertices.data(), GL_STATIC_DRAW);
+
+	glGenBuffers(1, &ebo);
+	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ebo);
+	glBufferData(GL_ELEMENT_ARRAY_BUFFER, elements.size() * sizeof(decltype(elements)::value_type), elements.data(), GL_STATIC_DRAW);
 
 	glEnableVertexAttribArray(0);
-	glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 2 * sizeof(float), (void const*)(uintptr_t)0);
+	glEnableVertexAttribArray(1);
+	glEnableVertexAttribArray(2);
+	glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(Vertex), (void const*)(uintptr_t)offsetof(Vertex, position));
+	glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, sizeof(Vertex), (void const*)(uintptr_t)offsetof(Vertex, normal));
+	glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, sizeof(Vertex), (void const*)(uintptr_t)offsetof(Vertex, uv));
 
 	auto shader = readFile("shader.glsl");
 
@@ -217,8 +265,10 @@ int main(int argc, char* argv[]) {
 
 	hyperengine::Texture texture;
 
+	stbi_set_flip_vertically_on_load(true);
+
 	int x, y;
-	stbi_uc* pixels = stbi_load("texture.png", &x, &y, nullptr, 4);
+	stbi_uc* pixels = stbi_load("varoom.png", &x, &y, nullptr, 4);
 
 	if (pixels) {
 		texture = {{
@@ -241,6 +291,10 @@ int main(int argc, char* argv[]) {
 	}
 
 	stbi_image_free(pixels);
+
+	glEnable(GL_DEPTH_TEST);
+	glEnable(GL_CULL_FACE);
+	glCullFace(GL_BACK);
 
 	while (!glfwWindowShouldClose(window.handle())) {
 		glfwPollEvents();
@@ -283,7 +337,7 @@ int main(int argc, char* argv[]) {
 			location = glGetUniformLocation(program, "uView");
 			glUniformMatrix4fv(location, 1, GL_FALSE, glm::value_ptr(glm::inverse(camera)));
 
-			glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+			glDrawElements(GL_TRIANGLES, numelements, GL_UNSIGNED_INT, nullptr);
 
 			ImGui::Render();
 			ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
