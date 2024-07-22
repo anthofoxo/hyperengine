@@ -1,7 +1,5 @@
 #include "he_texture.hpp"
 
-#include <bit>
-
 namespace hyperengine {
 	namespace {
 		GLint pixelFormatToInternalFormat(PixelFormat format) {
@@ -59,7 +57,7 @@ namespace hyperengine {
 				glTexImage2D(GL_TEXTURE_2D, 0, pixelFormatToInternalFormat(info.format), info.width, info.height, 0, pixelFormatToFormat(info.format), pixelFormatToType(info.format), nullptr);
 
 			// restore state
-			glBindTexture(GL_TEXTURE_2D, std::bit_cast<GLuint>(param));
+			glBindTexture(GL_TEXTURE_2D, static_cast<GLuint>(param));
 		}
 
 		if (GLAD_GL_KHR_debug)
@@ -89,7 +87,7 @@ namespace hyperengine {
 			glTexSubImage2D(GL_TEXTURE_2D, 0, info.xoffset, info.yoffset, info.width, info.height, pixelFormatToFormat(info.format), pixelFormatToType(info.format), info.pixels);
 
 			// restore state
-			glBindTexture(GL_TEXTURE_2D, std::bit_cast<GLuint>(param));
+			glBindTexture(GL_TEXTURE_2D, static_cast<GLuint>(param));
 		}
 	}
 
