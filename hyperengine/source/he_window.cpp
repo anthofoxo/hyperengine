@@ -2,14 +2,21 @@
 
 #include "he_platform.hpp"
 #include <cstdint>
+#include <cstdio>
 
 namespace hyperengine {
 	namespace {
 		uint_fast16_t gWindowCount = 0;
+
+		void errorCallback(int error, char const* description) {
+			fprintf(stderr, "GLFW Error %d: %s\n", error, description);
+		}
 	}
 
 	Window::Window(CreateInfo const& info) {
 		if (!gWindowCount) {
+			glfwSetErrorCallback(&errorCallback);
+
 			if (hyperengine::isWsl())
 				glfwInitHint(GLFW_PLATFORM, GLFW_PLATFORM_X11);
 

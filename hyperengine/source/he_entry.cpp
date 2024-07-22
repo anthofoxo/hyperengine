@@ -1,3 +1,7 @@
+#ifdef _WIN32
+#	include <Windows.h>
+#endif
+
 #include <glad/gl.h>
 #include <GLFW/glfw3.h>
 
@@ -20,6 +24,10 @@
 #include "he_window.hpp"
 #include "he_rdoc.hpp"
 #include "he_texture.hpp"
+
+#include <imgui.h>
+#include <backends/imgui_impl_glfw.h>
+#include <backends/imgui_impl_opengl3.h>
 
 GLuint makeShader(GLenum type, GLchar const* string, GLint length) {
 	GLuint shader = glCreateShader(type);
@@ -157,6 +165,23 @@ int main(int argc, char* argv[]) {
 		glDebugMessageControl(GL_DONT_CARE, GL_DONT_CARE, GL_DEBUG_SEVERITY_NOTIFICATION, 0, nullptr, GL_FALSE);
 	}
 
+	IMGUI_CHECKVERSION();
+	ImGui::CreateContext();
+	ImGuiIO& io = ImGui::GetIO(); (void)io;
+	io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
+	io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
+
+	ImGui::StyleColorsDark();
+
+	ImGuiStyle& style = ImGui::GetStyle();
+	if (io.ConfigFlags & ImGuiConfigFlags_ViewportsEnable) {
+		style.WindowRounding = 0.0f;
+		style.Colors[ImGuiCol_WindowBg].w = 1.0f;
+	}
+
+	ImGui_ImplGlfw_InitForOpenGL(window.handle(), true);
+	ImGui_ImplOpenGL3_Init("#version 330 core");
+
 	glClearColor(0.7f, 0.8f, 0.9f, 1.0f);
 
 	GLuint vao, vbo;
@@ -220,10 +245,20 @@ int main(int argc, char* argv[]) {
 	while (!glfwWindowShouldClose(window.handle())) {
 		glfwPollEvents();
 
+#ifdef _WIN32
+		io.ConfigDebugIsDebuggerPresent = IsDebuggerPresent();
+#endif
+
 		int width, height;
 		glfwGetFramebufferSize(window.handle(), &width, &height);
 		
 		if (width > 0 && height > 0) {
+			ImGui_ImplOpenGL3_NewFrame();
+			ImGui_ImplGlfw_NewFrame();
+			ImGui::NewFrame();
+
+			ImGui::ShowDemoWindow();
+
 			glViewport(0, 0, width, height);
 
 			glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
@@ -249,9 +284,24 @@ int main(int argc, char* argv[]) {
 			glUniformMatrix4fv(location, 1, GL_FALSE, glm::value_ptr(glm::inverse(camera)));
 
 			glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
-			glfwSwapBuffers(window.handle());
+
+			ImGui::Render();
+			ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
+
+			if (io.ConfigFlags & ImGuiConfigFlags_ViewportsEnable) {
+				GLFWwindow* backup_current_context = glfwGetCurrentContext();
+				ImGui::UpdatePlatformWindows();
+				ImGui::RenderPlatformWindowsDefault();
+				glfwMakeContextCurrent(backup_current_context);
+			}
 		}
+
+		glfwSwapBuffers(window.handle());
 	}
+
+	ImGui_ImplOpenGL3_Shutdown();
+	ImGui_ImplGlfw_Shutdown();
+	ImGui::DestroyContext();
 
 	glDeleteVertexArrays(1, &vao);
 	glDeleteBuffers(1, &vbo);
