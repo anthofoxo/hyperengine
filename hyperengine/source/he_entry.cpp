@@ -14,7 +14,11 @@
 
 #include <debug_trap.h>
 
+#define GLM_ENABLE_EXPERIMENTAL
 #include <glm/glm.hpp>
+#include <glm/gtc/quaternion.hpp>
+#include <glm/gtx/quaternion.hpp>
+#include <glm/gtx/matrix_decompose.hpp>
 #include <glm/gtc/type_ptr.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 
@@ -167,7 +171,7 @@ void message_callback(GLenum source, GLenum type, GLuint id, GLenum severity, GL
 }
 
 void loadMesh(GLuint& vao, GLuint& vbo, GLuint& ebo, GLsizei& count, GLenum& type, char const* file) {
-	std::vector<char> modelData = readFileBinary("varoom.hemesh").value();
+	std::vector<char> modelData = readFileBinary(file).value();
 
 	struct Header {
 		char bytes[16];
@@ -224,6 +228,34 @@ void loadMesh(GLuint& vao, GLuint& vbo, GLuint& ebo, GLsizei& count, GLenum& typ
 	else type = GL_UNSIGNED_INT;
 }
 
+struct Transform final {
+	glm::vec3 translation;
+	glm::quat orientation = glm::identity<glm::quat>();
+	glm::vec3 scale = glm::vec3(1.0f, 1.0f, 1.0f);
+
+	glm::mat4 get() const {
+		glm::vec3 skew = glm::zero<glm::vec3>();
+		glm::vec4 perspective(0.0f, 0.0f, 0.0f, 1.0f);
+		return glm::recompose(scale, orientation, translation, skew, perspective);
+
+		// Older method, kept for searchability
+		// glm::mat4 mat = glm::identity<glm::mat4>();
+		// mat = glm::translate(mat, translation);
+		// mat *= glm::toMat4(orientation);
+		// mat = glm::scale(mat, scale);
+		// return mat;
+	}
+
+	void set(glm::mat4 const& mat) {
+		glm::vec3 skew;
+		glm::vec4 perspective;
+		glm::decompose(mat, scale, orientation, translation, skew, perspective);
+	}
+};
+
+Transform cameraTransform;
+Transform objectTransform;
+
 int main(int argc, char* argv[]) {
 	hyperengine::setupRenderDoc(true);
 
@@ -248,6 +280,7 @@ int main(int argc, char* argv[]) {
 	ImGuiIO& io = ImGui::GetIO(); (void)io;
 	io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
 	io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
+	//io.ConfigFlags |= ImGuiConfigFlags_ViewportsEnable;
 
 	ImGui::StyleColorsDark();
 
@@ -313,6 +346,8 @@ int main(int argc, char* argv[]) {
 	glEnable(GL_CULL_FACE);
 	glCullFace(GL_BACK);
 
+	bool viewImGuiDemoWindow = false;
+
 	while (!glfwWindowShouldClose(window.handle())) {
 		glfwPollEvents();
 
@@ -328,7 +363,47 @@ int main(int argc, char* argv[]) {
 			ImGui_ImplGlfw_NewFrame();
 			ImGui::NewFrame();
 
-			ImGui::ShowDemoWindow();
+			if (ImGui::Begin("Debug", nullptr, ImGuiWindowFlags_MenuBar)) {
+				auto transformEditUi = [](Transform& transform) {
+					ImGui::PushID(&transform);
+					ImGui::DragFloat3("Translation", glm::value_ptr(transform.translation), 0.1f);
+					glm::vec3 oldEuler = glm::degrees(glm::eulerAngles(transform.orientation));
+					glm::vec3 newEuler = oldEuler;
+					if (ImGui::DragFloat3("Rotation", glm::value_ptr(newEuler))) {
+						glm::vec3 deltaEuler = glm::radians(newEuler - oldEuler);
+
+						transform.orientation = glm::rotate(transform.orientation, deltaEuler.x, glm::vec3(1, 0, 0));
+						transform.orientation = glm::rotate(transform.orientation, deltaEuler.y, glm::vec3(0, 1, 0));
+						transform.orientation = glm::rotate(transform.orientation, deltaEuler.z, glm::vec3(0, 0, 1));
+					}
+					ImGui::BeginDisabled();
+					ImGui::DragFloat4("Orientation", glm::value_ptr(transform.orientation), 0.1f);
+					ImGui::EndDisabled();
+					ImGui::DragFloat3("Scale", glm::value_ptr(transform.scale), 0.1f);
+					ImGui::PopID();
+				};
+
+				if (ImGui::BeginMenuBar()) {
+					if (ImGui::BeginMenu("View")) {
+						ImGui::MenuItem("ImGui Demo Window", nullptr, &viewImGuiDemoWindow);
+
+						ImGui::EndMenu();
+					}
+
+					ImGui::EndMenuBar();
+				}
+
+				ImGui::TextUnformatted("Camera");
+				ImGui::Separator();
+				transformEditUi(cameraTransform);
+				ImGui::TextUnformatted("Object");
+				ImGui::Separator();
+				transformEditUi(objectTransform);
+			}
+			ImGui::End();
+
+			if (viewImGuiDemoWindow)
+				ImGui::ShowDemoWindow(&viewImGuiDemoWindow);
 
 			glViewport(0, 0, width, height);
 
@@ -342,17 +417,11 @@ int main(int argc, char* argv[]) {
 			GLint location = glGetUniformLocation(program, "uProjection");
 			glUniformMatrix4fv(location, 1, GL_FALSE, glm::value_ptr(projection));
 
-			glm::mat4 transform = glm::identity<glm::mat4>();
-			transform = glm::rotate(transform, glm::radians(static_cast<float>(glfwGetTime() * 240.0f)), glm::vec3(1, 2, 1));
-
 			location = glGetUniformLocation(program, "uTransform");
-			glUniformMatrix4fv(location, 1, GL_FALSE, glm::value_ptr(transform));
-
-			glm::mat4 camera = glm::identity<glm::mat4>();
-			camera = glm::translate(camera, glm::vec3(0, 0, 3));
+			glUniformMatrix4fv(location, 1, GL_FALSE, glm::value_ptr(objectTransform.get()));
 
 			location = glGetUniformLocation(program, "uView");
-			glUniformMatrix4fv(location, 1, GL_FALSE, glm::value_ptr(glm::inverse(camera)));
+			glUniformMatrix4fv(location, 1, GL_FALSE, glm::value_ptr(glm::inverse(cameraTransform.get())));
 
 			glDrawElements(GL_TRIANGLES, count, type, nullptr);
 

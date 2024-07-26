@@ -13,7 +13,7 @@ UNIFORM(sampler2D, uSampler);
 void main(void) {
     gl_Position = uProjection * uView * uTransform * vec4(iPosition, 1.0);
     vTexCoord = iTexCoord;
-    vNormal = mat3(uTransform) * iNormal;
+    vNormal = inverse(transpose(mat3(uTransform))) * iNormal;
 }
 #endif
 
