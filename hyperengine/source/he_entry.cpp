@@ -33,6 +33,32 @@
 #include <backends/imgui_impl_glfw.h>
 #include <backends/imgui_impl_opengl3.h>
 
+#include <assimp/Importer.hpp>
+#include <assimp/scene.h>
+#include <assimp/postprocess.h>
+
+// ImHex Pattern Matcher
+#if 0
+#pragma array_limit 2000000
+#pragma pattern_limit 2000000
+
+struct Vertex {
+	float data[8];
+};
+
+struct HeMesh {
+	u8 header[16];
+	u32 vertexCount;
+	Vertex vertices[vertexCount];
+	u32 elementCount;
+	match(vertexCount) {
+		(0x0000 ... 0x00FF) : u8 elements[elementCount];
+		(0x0100 ... 0xFFFF) : u16 elements[elementCount];
+		(_) : u32 elements[elementCount];
+	}
+};
+#endif
+
 GLuint makeShader(GLenum type, GLchar const* string, GLint length) {
 	GLuint shader = glCreateShader(type);
 	glShaderSource(shader, 1, &string, &length);
@@ -170,64 +196,6 @@ void message_callback(GLenum source, GLenum type, GLuint id, GLenum severity, GL
 	psnip_trap();
 }
 
-void loadMesh(GLuint& vao, GLuint& vbo, GLuint& ebo, GLsizei& count, GLenum& type, char const* file) {
-	std::vector<char> modelData = readFileBinary(file).value();
-
-	struct Header {
-		char bytes[16];
-	} header;
-
-	char* ptr = modelData.data();
-	memcpy(&header, ptr, 16);
-	ptr += 16;
-
-	uint32_t numverts;
-	memcpy(&numverts, ptr, 4);
-	ptr += 4;
-
-	std::vector<Vertex> vertices;
-	vertices.resize(numverts);
-	memcpy(vertices.data(), ptr, numverts * sizeof(Vertex));
-	ptr += numverts * sizeof(Vertex);
-
-	uint32_t numelements;
-	memcpy(&numelements, ptr, 4);
-	ptr += 4;
-
-	unsigned int elementwidth;
-	if (vertices.size() < std::numeric_limits<uint8_t>::max()) elementwidth = 1;
-	else if (vertices.size() < std::numeric_limits<uint16_t>::max()) elementwidth = 2;
-	else elementwidth = 4;
-
-	std::vector<uint8_t> elements;
-	elements.resize(numelements * elementwidth);
-	memcpy(elements.data(), ptr, elements.size());
-
-	glGenVertexArrays(1, &vao);
-	glBindVertexArray(vao);
-
-	glGenBuffers(1, &vbo);
-	glBindBuffer(GL_ARRAY_BUFFER, vbo);
-	glBufferData(GL_ARRAY_BUFFER, vertices.size() * sizeof(decltype(vertices)::value_type), vertices.data(), GL_STATIC_DRAW);
-
-	glGenBuffers(1, &ebo);
-	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ebo);
-	glBufferData(GL_ELEMENT_ARRAY_BUFFER, elements.size() * sizeof(decltype(elements)::value_type), elements.data(), GL_STATIC_DRAW);
-
-	glEnableVertexAttribArray(0);
-	glEnableVertexAttribArray(1);
-	glEnableVertexAttribArray(2);
-	glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(Vertex), (void const*)(uintptr_t)offsetof(Vertex, position));
-	glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, sizeof(Vertex), (void const*)(uintptr_t)offsetof(Vertex, normal));
-	glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, sizeof(Vertex), (void const*)(uintptr_t)offsetof(Vertex, uv));
-
-	count = numelements;
-
-	if (elementwidth == 1) type = GL_UNSIGNED_BYTE;
-	else if (elementwidth == 2) type = GL_UNSIGNED_SHORT;
-	else type = GL_UNSIGNED_INT;
-}
-
 struct Transform final {
 	glm::vec3 translation;
 	glm::quat orientation = glm::identity<glm::quat>();
@@ -237,13 +205,6 @@ struct Transform final {
 		glm::vec3 skew = glm::zero<glm::vec3>();
 		glm::vec4 perspective(0.0f, 0.0f, 0.0f, 1.0f);
 		return glm::recompose(scale, orientation, translation, skew, perspective);
-
-		// Older method, kept for searchability
-		// glm::mat4 mat = glm::identity<glm::mat4>();
-		// mat = glm::translate(mat, translation);
-		// mat *= glm::toMat4(orientation);
-		// mat = glm::scale(mat, scale);
-		// return mat;
 	}
 
 	void set(glm::mat4 const& mat) {
@@ -255,6 +216,116 @@ struct Transform final {
 
 Transform cameraTransform;
 Transform objectTransform;
+
+void transformEditUi(Transform& transform) {
+	ImGui::PushID(&transform);
+	ImGui::DragFloat3("Translation", glm::value_ptr(transform.translation), 0.1f);
+	glm::vec3 oldEuler = glm::degrees(glm::eulerAngles(transform.orientation));
+	glm::vec3 newEuler = oldEuler;
+	if (ImGui::DragFloat3("Rotation", glm::value_ptr(newEuler))) {
+		glm::vec3 deltaEuler = glm::radians(newEuler - oldEuler);
+
+		transform.orientation = glm::rotate(transform.orientation, deltaEuler.x, glm::vec3(1, 0, 0));
+		transform.orientation = glm::rotate(transform.orientation, deltaEuler.y, glm::vec3(0, 1, 0));
+		transform.orientation = glm::rotate(transform.orientation, deltaEuler.z, glm::vec3(0, 0, 1));
+	}
+	ImGui::BeginDisabled();
+	ImGui::DragFloat4("Orientation", glm::value_ptr(transform.orientation), 0.1f);
+	ImGui::EndDisabled();
+	ImGui::DragFloat3("Scale", glm::value_ptr(transform.scale), 0.1f);
+	ImGui::PopID();
+}
+
+struct Mesh final {
+	GLuint vao, vbo, ebo;
+	GLenum type;
+	GLsizei count;
+
+	void draw() {
+		glDrawElements(GL_TRIANGLES, count, type, nullptr);
+	}
+};
+
+static std::optional<Mesh> loadMesh(char const* path) {
+	static_assert(sizeof(aiVector3D) == sizeof(glm::vec3));
+
+	Assimp::Importer import; 
+	aiScene const* scene = import.ReadFile(path, aiProcess_JoinIdenticalVertices | aiProcess_Triangulate | aiProcess_RemoveComponent | aiProcess_FlipUVs | aiProcess_OptimizeGraph | aiProcess_OptimizeMeshes | aiProcess_ImproveCacheLocality | aiProcess_FixInfacingNormals);
+
+	if (!scene || scene->mFlags & AI_SCENE_FLAGS_INCOMPLETE || !scene->mRootNode) {
+		std::cerr << import.GetErrorString() << '\n';
+		return std::nullopt;
+	}
+
+	if (scene->mNumMeshes != 1) {
+		std::cerr << "Only one mesh can be exported currently\n";
+		return std::nullopt;
+	}
+
+	aiMesh* mesh = scene->mMeshes[0];
+
+	std::vector<Vertex> vertices;
+	vertices.reserve(mesh->mNumVertices);
+	
+	for (unsigned int i = 0; i < mesh->mNumVertices; ++i) {
+		auto& textureCoord = mesh->mTextureCoords[0][i];
+		vertices.emplace_back(std::bit_cast<glm::vec3>(mesh->mVertices[i]), std::bit_cast<glm::vec3>(mesh->mNormals[i]), glm::vec2(textureCoord.x, textureCoord.y));
+	}
+
+	unsigned char elementPrimitiveWidth;
+	if (mesh->mNumVertices <= std::numeric_limits<uint8_t>::max()) elementPrimitiveWidth = sizeof(uint8_t);
+	else if (mesh->mNumVertices <= std::numeric_limits<uint16_t>::max()) elementPrimitiveWidth = sizeof(uint16_t);
+	else elementPrimitiveWidth = sizeof(uint32_t);
+
+	std::vector<char> elements;
+	elements.reserve(mesh->mNumFaces * 3 * elementPrimitiveWidth);
+
+	GLsizei count = 0;
+
+	for (unsigned int iFace = 0; iFace < mesh->mNumFaces; iFace++) {
+		aiFace face = mesh->mFaces[iFace];
+		if (face.mNumIndices != 3) continue;
+
+		for (unsigned int iElement = 0; iElement < 3; ++iElement) {
+			++count;
+
+			for (unsigned int iReserve = 0; iReserve < elementPrimitiveWidth; ++iReserve)
+				elements.push_back(0);
+
+			// This method is okay for little endian systems, should verify for big endian
+			uint32_t element = face.mIndices[iElement];
+			memcpy(elements.data() + elements.size() - elementPrimitiveWidth, &element, elementPrimitiveWidth);
+		}
+	}
+
+	Mesh glmesh;
+
+	glGenVertexArrays(1, &glmesh.vao);
+	glBindVertexArray(glmesh.vao);
+
+	glGenBuffers(1, &glmesh.vbo);
+	glBindBuffer(GL_ARRAY_BUFFER, glmesh.vbo);
+	glBufferData(GL_ARRAY_BUFFER, vertices.size() * sizeof(decltype(vertices)::value_type), vertices.data(), GL_STATIC_DRAW);
+
+	glGenBuffers(1, &glmesh.ebo);
+	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, glmesh.ebo);
+	glBufferData(GL_ELEMENT_ARRAY_BUFFER, elements.size() * sizeof(decltype(elements)::value_type), elements.data(), GL_STATIC_DRAW);
+
+	glEnableVertexAttribArray(0);
+	glEnableVertexAttribArray(1);
+	glEnableVertexAttribArray(2);
+	glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(Vertex), (void const*)(uintptr_t)offsetof(Vertex, position));
+	glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, sizeof(Vertex), (void const*)(uintptr_t)offsetof(Vertex, normal));
+	glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, sizeof(Vertex), (void const*)(uintptr_t)offsetof(Vertex, uv));
+
+	glmesh.count = count;
+
+	if (elementPrimitiveWidth == 1) glmesh.type = GL_UNSIGNED_BYTE;
+	else if (elementPrimitiveWidth == 2) glmesh.type = GL_UNSIGNED_SHORT;
+	else glmesh.type = GL_UNSIGNED_INT;
+
+	return glmesh;
+}
 
 int main(int argc, char* argv[]) {
 	hyperengine::setupRenderDoc(true);
@@ -295,10 +366,8 @@ int main(int argc, char* argv[]) {
 
 	glClearColor(0.7f, 0.8f, 0.9f, 1.0f);
 
-	GLuint vao, vbo, ebo;
-	GLsizei count;
-	GLenum type;
-	loadMesh(vao, vbo, ebo, count, type, "varoom.hemesh");
+	auto optMesh = loadMesh("varoom.obj");
+	Mesh mesh = optMesh.value();
 
 	auto shader = readFile("shader.glsl");
 
@@ -364,25 +433,6 @@ int main(int argc, char* argv[]) {
 			ImGui::NewFrame();
 
 			if (ImGui::Begin("Debug", nullptr, ImGuiWindowFlags_MenuBar)) {
-				auto transformEditUi = [](Transform& transform) {
-					ImGui::PushID(&transform);
-					ImGui::DragFloat3("Translation", glm::value_ptr(transform.translation), 0.1f);
-					glm::vec3 oldEuler = glm::degrees(glm::eulerAngles(transform.orientation));
-					glm::vec3 newEuler = oldEuler;
-					if (ImGui::DragFloat3("Rotation", glm::value_ptr(newEuler))) {
-						glm::vec3 deltaEuler = glm::radians(newEuler - oldEuler);
-
-						transform.orientation = glm::rotate(transform.orientation, deltaEuler.x, glm::vec3(1, 0, 0));
-						transform.orientation = glm::rotate(transform.orientation, deltaEuler.y, glm::vec3(0, 1, 0));
-						transform.orientation = glm::rotate(transform.orientation, deltaEuler.z, glm::vec3(0, 0, 1));
-					}
-					ImGui::BeginDisabled();
-					ImGui::DragFloat4("Orientation", glm::value_ptr(transform.orientation), 0.1f);
-					ImGui::EndDisabled();
-					ImGui::DragFloat3("Scale", glm::value_ptr(transform.scale), 0.1f);
-					ImGui::PopID();
-				};
-
 				if (ImGui::BeginMenuBar()) {
 					if (ImGui::BeginMenu("View")) {
 						ImGui::MenuItem("ImGui Demo Window", nullptr, &viewImGuiDemoWindow);
@@ -408,7 +458,7 @@ int main(int argc, char* argv[]) {
 			glViewport(0, 0, width, height);
 
 			glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
-			glBindVertexArray(vao);
+			glBindVertexArray(mesh.vao);
 			texture.bind(0);
 			glUseProgram(program);
 
@@ -423,7 +473,7 @@ int main(int argc, char* argv[]) {
 			location = glGetUniformLocation(program, "uView");
 			glUniformMatrix4fv(location, 1, GL_FALSE, glm::value_ptr(glm::inverse(cameraTransform.get())));
 
-			glDrawElements(GL_TRIANGLES, count, type, nullptr);
+			mesh.draw();
 
 			ImGui::Render();
 			ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
@@ -443,8 +493,9 @@ int main(int argc, char* argv[]) {
 	ImGui_ImplGlfw_Shutdown();
 	ImGui::DestroyContext();
 
-	glDeleteVertexArrays(1, &vao);
-	glDeleteBuffers(1, &vbo);
+	glDeleteVertexArrays(1, &mesh.vao);
+	glDeleteBuffers(1, &mesh.vbo);
+	glDeleteBuffers(1, &mesh.ebo);
 	glDeleteProgram(program);
 
     return 0;
