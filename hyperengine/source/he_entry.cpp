@@ -9,7 +9,6 @@
 #include <iostream>
 #include <optional>
 #include <vector>
-#include <fstream>
 #include <format>
 
 #include <debug_trap.h>
@@ -28,6 +27,8 @@
 #include "he_window.hpp"
 #include "he_rdoc.hpp"
 #include "he_texture.hpp"
+#include "he_shader.hpp"
+#include "he_io.hpp"
 
 #include <imgui.h>
 #include <backends/imgui_impl_glfw.h>
@@ -37,162 +38,41 @@
 #include <assimp/scene.h>
 #include <assimp/postprocess.h>
 
-// ImHex Pattern Matcher
-#if 0
-#pragma array_limit 2000000
-#pragma pattern_limit 2000000
-
-struct Vertex {
-	float data[8];
-};
-
-struct HeMesh {
-	u8 header[16];
-	u32 vertexCount;
-	Vertex vertices[vertexCount];
-	u32 elementCount;
-	match(vertexCount) {
-		(0x0000 ... 0x00FF) : u8 elements[elementCount];
-		(0x0100 ... 0xFFFF) : u16 elements[elementCount];
-		(_) : u32 elements[elementCount];
-	}
-};
-#endif
-
-GLuint makeShader(GLenum type, GLchar const* string, GLint length) {
-	GLuint shader = glCreateShader(type);
-	glShaderSource(shader, 1, &string, &length);
-	glCompileShader(shader);
-
-	GLint param;
-	glGetShaderiv(shader, GL_INFO_LOG_LENGTH, &param);
-
-	if (param > 0) {
-		std::string error;
-		error.resize(param);
-		glGetShaderInfoLog(shader, param, nullptr, error.data());
-		std::cerr << error << '\n';
-		psnip_trap();
-	}
-
-	return shader;
-}
-
-GLuint makeProgram(GLuint vert, GLuint frag) {
-	GLuint program = glCreateProgram();
-	glAttachShader(program, vert);
-	glAttachShader(program, frag);
-	glLinkProgram(program);
-	glDetachShader(program, vert);
-	glDetachShader(program, frag);
-
-	GLint param;
-	glGetProgramiv(program, GL_INFO_LOG_LENGTH, &param);
-
-	if (param > 0) {
-		std::string error;
-		error.resize(param);
-		glGetProgramInfoLog(program, param, nullptr, error.data());
-		std::cerr << error << '\n';
-		psnip_trap();
-	}
-
-	return program;
-}
-
-std::optional<std::string> readFile(char const* path) {
-	std::ifstream file;
-	file.open(path, std::ios::in | std::ios::binary);
-	if (!file) return std::nullopt;
-
-	std::string content;
-	file.seekg(0, std::ios::end);
-	auto size = file.tellg();
-	content.resize(size);
-	file.seekg(0, std::ios::beg);
-	file.read(content.data(), content.size());
-	file.close();
-	return content;
-}
-
-
-std::optional<std::vector<char>> readFileBinary(char const* path) {
-	std::ifstream file;
-	file.open(path, std::ios::in | std::ios::binary);
-	if (!file) return std::nullopt;
-
-	std::vector<char> content;
-	file.seekg(0, std::ios::end);
-	auto size = file.tellg();
-	content.resize(size);
-	file.seekg(0, std::ios::beg);
-	file.read(content.data(), content.size());
-	file.close();
-	return content;
-}
-
 struct Vertex {
 	glm::vec3 position;
 	glm::vec3 normal;
 	glm::vec2 uv;
 };
 
-char const* vertHeader = R"(#version 330 core
-#define VERT
-#define INPUT(type, name, index) layout(location = index) in type name
-#define OUTPUT(type, name, index)
-#define VARYING(type, name) out type name
-#define UNIFORM(type, name) uniform type name
-#line 1
-)";
+#define HE_IMPL_EXPAND(x) case x: return #x
+std::string_view glConstantToString(GLuint val) {
+	switch (val) {
+	HE_IMPL_EXPAND(GL_DEBUG_SOURCE_API);
+	HE_IMPL_EXPAND(GL_DEBUG_SOURCE_WINDOW_SYSTEM);
+	HE_IMPL_EXPAND(GL_DEBUG_SOURCE_SHADER_COMPILER);
+	HE_IMPL_EXPAND(GL_DEBUG_SOURCE_THIRD_PARTY);
+	HE_IMPL_EXPAND(GL_DEBUG_SOURCE_APPLICATION);
+	HE_IMPL_EXPAND(GL_DEBUG_SOURCE_OTHER);
 
-char const* fragHeader = R"(#version 330 core
-#define FRAG
-#define INPUT(type, name, index)
-#define OUTPUT(type, name, index) layout(location = index) out type name
-#define VARYING(type, name) in type name
-#define UNIFORM(type, name) uniform type name
-#line 1
-)";
+	HE_IMPL_EXPAND(GL_DEBUG_TYPE_ERROR);
+	HE_IMPL_EXPAND(GL_DEBUG_TYPE_DEPRECATED_BEHAVIOR);
+	HE_IMPL_EXPAND(GL_DEBUG_TYPE_UNDEFINED_BEHAVIOR);
+	HE_IMPL_EXPAND(GL_DEBUG_TYPE_PORTABILITY);
+	HE_IMPL_EXPAND(GL_DEBUG_TYPE_PERFORMANCE);
+	HE_IMPL_EXPAND(GL_DEBUG_TYPE_MARKER);
+	HE_IMPL_EXPAND(GL_DEBUG_TYPE_OTHER);
+
+	HE_IMPL_EXPAND(GL_DEBUG_SEVERITY_NOTIFICATION);
+	HE_IMPL_EXPAND(GL_DEBUG_SEVERITY_LOW);
+	HE_IMPL_EXPAND(GL_DEBUG_SEVERITY_MEDIUM);
+	HE_IMPL_EXPAND(GL_DEBUG_SEVERITY_HIGH);
+	default: return "?";
+	}
+}
+#undef HE_IMPL_EXPAND
 
 void message_callback(GLenum source, GLenum type, GLuint id, GLenum severity, GLsizei length, GLchar const* message, void const* user_param) {
-	auto const src_str = [source]() {
-		switch (source)
-		{
-		case GL_DEBUG_SOURCE_API: return "API";
-		case GL_DEBUG_SOURCE_WINDOW_SYSTEM: return "WINDOW SYSTEM";
-		case GL_DEBUG_SOURCE_SHADER_COMPILER: return "SHADER COMPILER";
-		case GL_DEBUG_SOURCE_THIRD_PARTY: return "THIRD PARTY";
-		case GL_DEBUG_SOURCE_APPLICATION: return "APPLICATION";
-		case GL_DEBUG_SOURCE_OTHER: return "OTHER";
-		default: return "?";
-		}
-	}();
-
-	auto const type_str = [type]() {
-		switch (type)
-		{
-		case GL_DEBUG_TYPE_ERROR: return "ERROR";
-		case GL_DEBUG_TYPE_DEPRECATED_BEHAVIOR: return "DEPRECATED_BEHAVIOR";
-		case GL_DEBUG_TYPE_UNDEFINED_BEHAVIOR: return "UNDEFINED_BEHAVIOR";
-		case GL_DEBUG_TYPE_PORTABILITY: return "PORTABILITY";
-		case GL_DEBUG_TYPE_PERFORMANCE: return "PERFORMANCE";
-		case GL_DEBUG_TYPE_MARKER: return "MARKER";
-		case GL_DEBUG_TYPE_OTHER: return "OTHER";
-		default: return "?";
-		}
-	}();
-
-	auto const severity_str = [severity]() {
-		switch (severity) {
-		case GL_DEBUG_SEVERITY_NOTIFICATION: return "NOTIFICATION";
-		case GL_DEBUG_SEVERITY_LOW: return "LOW";
-		case GL_DEBUG_SEVERITY_MEDIUM: return "MEDIUM";
-		case GL_DEBUG_SEVERITY_HIGH: return "HIGH";
-		default: return "?";
-		}
-	}();
-	std::cout << src_str << ", " << type_str << ", " << severity_str << ", " << id << ": " << message << '\n';
+	std::cout << glConstantToString(source) << ", " << glConstantToString(type) << ", " << glConstantToString(severity) << ", " << id << ": " << message << '\n';
 	psnip_trap();
 }
 
@@ -217,6 +97,8 @@ struct Transform final {
 Transform cameraTransform;
 Transform objectTransform;
 
+bool enableQuaternionEditing = false;
+
 void transformEditUi(Transform& transform) {
 	ImGui::PushID(&transform);
 	ImGui::DragFloat3("Translation", glm::value_ptr(transform.translation), 0.1f);
@@ -229,7 +111,7 @@ void transformEditUi(Transform& transform) {
 		transform.orientation = glm::rotate(transform.orientation, deltaEuler.y, glm::vec3(0, 1, 0));
 		transform.orientation = glm::rotate(transform.orientation, deltaEuler.z, glm::vec3(0, 0, 1));
 	}
-	ImGui::BeginDisabled();
+	ImGui::BeginDisabled(!enableQuaternionEditing);
 	ImGui::DragFloat4("Orientation", glm::value_ptr(transform.orientation), 0.1f);
 	ImGui::EndDisabled();
 	ImGui::DragFloat3("Scale", glm::value_ptr(transform.scale), 0.1f);
@@ -300,23 +182,51 @@ static std::optional<Mesh> loadMesh(char const* path) {
 
 	Mesh glmesh;
 
-	glGenVertexArrays(1, &glmesh.vao);
-	glBindVertexArray(glmesh.vao);
+	if (GLAD_GL_ARB_direct_state_access) {
 
-	glGenBuffers(1, &glmesh.vbo);
-	glBindBuffer(GL_ARRAY_BUFFER, glmesh.vbo);
-	glBufferData(GL_ARRAY_BUFFER, vertices.size() * sizeof(decltype(vertices)::value_type), vertices.data(), GL_STATIC_DRAW);
+		glCreateVertexArrays(1, &glmesh.vao);
 
-	glGenBuffers(1, &glmesh.ebo);
-	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, glmesh.ebo);
-	glBufferData(GL_ELEMENT_ARRAY_BUFFER, elements.size() * sizeof(decltype(elements)::value_type), elements.data(), GL_STATIC_DRAW);
+		glCreateBuffers(1, &glmesh.vbo);
+		glNamedBufferStorage(glmesh.vbo, vertices.size() * sizeof(decltype(vertices)::value_type), vertices.data(), 0);
 
-	glEnableVertexAttribArray(0);
-	glEnableVertexAttribArray(1);
-	glEnableVertexAttribArray(2);
-	glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(Vertex), (void const*)(uintptr_t)offsetof(Vertex, position));
-	glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, sizeof(Vertex), (void const*)(uintptr_t)offsetof(Vertex, normal));
-	glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, sizeof(Vertex), (void const*)(uintptr_t)offsetof(Vertex, uv));
+		glCreateBuffers(1, &glmesh.ebo);
+		glNamedBufferStorage(glmesh.ebo, elements.size() * sizeof(decltype(elements)::value_type), elements.data(), 0);
+
+		GLuint bindingIndex = 0;
+		glVertexArrayVertexBuffer(glmesh.vao, bindingIndex, glmesh.vbo, 0, sizeof(Vertex));
+		glVertexArrayElementBuffer(glmesh.vao, glmesh.ebo);
+
+		glEnableVertexArrayAttrib(glmesh.vao, 0);
+		glEnableVertexArrayAttrib(glmesh.vao, 1);
+		glEnableVertexArrayAttrib(glmesh.vao, 2);
+
+		glVertexArrayAttribFormat(glmesh.vao, 0, 3, GL_FLOAT, GL_FALSE, (GLuint)offsetof(Vertex, position));
+		glVertexArrayAttribFormat(glmesh.vao, 1, 3, GL_FLOAT, GL_FALSE, (GLuint)offsetof(Vertex, normal));
+		glVertexArrayAttribFormat(glmesh.vao, 2, 2, GL_FLOAT, GL_FALSE, (GLuint)offsetof(Vertex, uv));
+
+		glVertexArrayAttribBinding(glmesh.vao, 0, bindingIndex);
+		glVertexArrayAttribBinding(glmesh.vao, 1, bindingIndex);
+		glVertexArrayAttribBinding(glmesh.vao, 2, bindingIndex);
+	}
+	else {
+		glGenVertexArrays(1, &glmesh.vao);
+		glBindVertexArray(glmesh.vao);
+
+		glGenBuffers(1, &glmesh.vbo);
+		glBindBuffer(GL_ARRAY_BUFFER, glmesh.vbo);
+		glBufferData(GL_ARRAY_BUFFER, vertices.size() * sizeof(decltype(vertices)::value_type), vertices.data(), GL_STATIC_DRAW);
+
+		glGenBuffers(1, &glmesh.ebo);
+		glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, glmesh.ebo);
+		glBufferData(GL_ELEMENT_ARRAY_BUFFER, elements.size() * sizeof(decltype(elements)::value_type), elements.data(), GL_STATIC_DRAW);
+
+		glEnableVertexAttribArray(0);
+		glEnableVertexAttribArray(1);
+		glEnableVertexAttribArray(2);
+		glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(Vertex), (void const*)(uintptr_t)offsetof(Vertex, position));
+		glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, sizeof(Vertex), (void const*)(uintptr_t)offsetof(Vertex, normal));
+		glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, sizeof(Vertex), (void const*)(uintptr_t)offsetof(Vertex, uv));
+	}
 
 	glmesh.count = count;
 
@@ -369,18 +279,17 @@ int main(int argc, char* argv[]) {
 	auto optMesh = loadMesh("varoom.obj");
 	Mesh mesh = optMesh.value();
 
-	auto shader = readFile("shader.glsl");
+	hyperengine::ShaderProgram program;
 
-	auto vertSource = std::string(vertHeader) + shader.value();
-	auto fragSource = std::string(fragHeader) + shader.value();
+	{
+		auto shader = hyperengine::readFileString("shader.glsl");
 
-	GLuint vert = makeShader(GL_VERTEX_SHADER, vertSource.data(), static_cast<int>(vertSource.size()));
-	GLuint frag = makeShader(GL_FRAGMENT_SHADER, fragSource.data(), static_cast<int>(fragSource.size()));
-
-	GLuint program = makeProgram(vert, frag);
-
-	glDeleteShader(vert);
-	glDeleteShader(frag);
+		if (shader.has_value()) {
+			program = {{
+				.source = shader.value()
+			}};
+		}
+	}
 
 	hyperengine::Texture texture;
 
@@ -420,14 +329,14 @@ int main(int argc, char* argv[]) {
 	while (!glfwWindowShouldClose(window.handle())) {
 		glfwPollEvents();
 
-#ifdef _WIN32
-		io.ConfigDebugIsDebuggerPresent = IsDebuggerPresent();
-#endif
-
 		int width, height;
 		glfwGetFramebufferSize(window.handle(), &width, &height);
 		
 		if (width > 0 && height > 0) {
+#ifdef _WIN32
+			io.ConfigDebugIsDebuggerPresent = IsDebuggerPresent();
+#endif
+
 			ImGui_ImplOpenGL3_NewFrame();
 			ImGui_ImplGlfw_NewFrame();
 			ImGui::NewFrame();
@@ -443,12 +352,15 @@ int main(int argc, char* argv[]) {
 					ImGui::EndMenuBar();
 				}
 
-				ImGui::TextUnformatted("Camera");
-				ImGui::Separator();
-				transformEditUi(cameraTransform);
-				ImGui::TextUnformatted("Object");
-				ImGui::Separator();
-				transformEditUi(objectTransform);
+				ImGui::Checkbox("Quaternion editing", &enableQuaternionEditing);
+
+				if (ImGui::CollapsingHeader("Camera")) {
+					transformEditUi(cameraTransform);
+				}
+
+				if (ImGui::CollapsingHeader("Object")) {
+					transformEditUi(cameraTransform);
+				}
 			}
 			ImGui::End();
 
@@ -460,18 +372,14 @@ int main(int argc, char* argv[]) {
 			glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
 			glBindVertexArray(mesh.vao);
 			texture.bind(0);
-			glUseProgram(program);
+
+			program.bind();
 
 			glm::mat4 projection = glm::perspective(glm::radians(80.0f), static_cast<float>(width) / static_cast<float>(height), 0.1f, 100.0f);
 
-			GLint location = glGetUniformLocation(program, "uProjection");
-			glUniformMatrix4fv(location, 1, GL_FALSE, glm::value_ptr(projection));
-
-			location = glGetUniformLocation(program, "uTransform");
-			glUniformMatrix4fv(location, 1, GL_FALSE, glm::value_ptr(objectTransform.get()));
-
-			location = glGetUniformLocation(program, "uView");
-			glUniformMatrix4fv(location, 1, GL_FALSE, glm::value_ptr(glm::inverse(cameraTransform.get())));
+			program.uniformMat4f("uProjection", projection);
+			program.uniformMat4f("uTransform", objectTransform.get());
+			program.uniformMat4f("uView", glm::inverse(cameraTransform.get()));
 
 			mesh.draw();
 
@@ -484,9 +392,10 @@ int main(int argc, char* argv[]) {
 				ImGui::RenderPlatformWindowsDefault();
 				glfwMakeContextCurrent(backup_current_context);
 			}
+
+			window.swapBuffers();
 		}
 
-		glfwSwapBuffers(window.handle());
 	}
 
 	ImGui_ImplOpenGL3_Shutdown();
@@ -496,7 +405,6 @@ int main(int argc, char* argv[]) {
 	glDeleteVertexArrays(1, &mesh.vao);
 	glDeleteBuffers(1, &mesh.vbo);
 	glDeleteBuffers(1, &mesh.ebo);
-	glDeleteProgram(program);
 
     return 0;
 }

@@ -52,4 +52,8 @@ namespace hyperengine {
 				glfwTerminate();
 		}
 	}
+
+	void Window::swapBuffers() {
+		glfwSwapBuffers(mHandle);
+	}
 }

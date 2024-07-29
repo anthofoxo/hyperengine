@@ -13,13 +13,13 @@ UNIFORM(sampler2D, uSampler);
 void main(void) {
     gl_Position = uProjection * uView * uTransform * vec4(iPosition, 1.0);
     vTexCoord = iTexCoord;
-    vNormal = inverse(transpose(mat3(uTransform))) * iNormal;
+    vNormal = transpose(inverse(mat3(uTransform))) * iNormal;
 }
 #endif
 
 #ifdef FRAG
 void main(void) {
     oColor = texture(uSampler, vTexCoord);
-    oColor.rgb *= max(dot(vNormal, normalize(vec3(0, 0, 1))), 0.2);
+    oColor.rgb *= max(dot(normalize(vNormal), normalize(vec3(0, 0, 1))), 0.2);
 }
 #endif

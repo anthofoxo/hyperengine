@@ -20,6 +20,8 @@ namespace hyperengine {
 		~Window() noexcept;
 
 		inline GLFWwindow* handle() const { return mHandle; }
+
+		void swapBuffers();
 	private:
 		GLFWwindow* mHandle = nullptr;
 	};
