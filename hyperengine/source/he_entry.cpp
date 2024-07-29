@@ -12,6 +12,8 @@
 #include <optional>
 #include <vector>
 #include <format>
+#include <array>
+#include <span>
 
 #include <debug_trap.h>
 
@@ -23,9 +25,6 @@
 #include <glm/gtc/type_ptr.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 
-#define STB_IMAGE_IMPLEMENTATION
-#include <stb_image.h>
-
 #include "he_mesh.hpp"
 #include "he_window.hpp"
 #include "he_rdoc.hpp"
@@ -33,25 +32,12 @@
 #include "he_shader.hpp"
 #include "he_io.hpp"
 
-#include <array>
-#include <span>
-
 #include <imgui.h>
 #include <backends/imgui_impl_glfw.h>
 #include <backends/imgui_impl_opengl3.h>
 
-#include <assimp/Importer.hpp>
-#include <assimp/scene.h>
-#include <assimp/postprocess.h>
-
-struct Vertex {
-	glm::vec3 position;
-	glm::vec3 normal;
-	glm::vec2 uv;
-};
-
 #define HE_IMPL_EXPAND(x) case x: return #x
-std::string_view glConstantToString(GLuint val) {
+static std::string_view glConstantToString(GLuint val) {
 	switch (val) {
 	HE_IMPL_EXPAND(GL_DEBUG_SOURCE_API);
 	HE_IMPL_EXPAND(GL_DEBUG_SOURCE_WINDOW_SYSTEM);
@@ -77,13 +63,13 @@ std::string_view glConstantToString(GLuint val) {
 }
 #undef HE_IMPL_EXPAND
 
-void message_callback(GLenum source, GLenum type, GLuint id, GLenum severity, GLsizei length, GLchar const* message, void const* user_param) {
+static void message_callback(GLenum source, GLenum type, GLuint id, GLenum severity, GLsizei length, GLchar const* message, void const* user_param) {
 	std::cout << glConstantToString(source) << ", " << glConstantToString(type) << ", " << glConstantToString(severity) << ", " << id << ": " << message << '\n';
 	psnip_trap();
 }
 
 struct Transform final {
-	glm::vec3 translation;
+	glm::vec3 translation{};
 	glm::quat orientation = glm::identity<glm::quat>();
 	glm::vec3 scale = glm::vec3(1.0f, 1.0f, 1.0f);
 
@@ -100,12 +86,7 @@ struct Transform final {
 	}
 };
 
-Transform cameraTransform;
-Transform objectTransform;
-
-bool enableQuaternionEditing = false;
-
-void transformEditUi(Transform& transform) {
+static void transformEditUi(Transform& transform, bool enableQuaternionEditing) {
 	ImGui::PushID(&transform);
 	ImGui::DragFloat3("Translation", glm::value_ptr(transform.translation), 0.1f);
 	glm::vec3 oldEuler = glm::degrees(glm::eulerAngles(transform.orientation));
@@ -124,84 +105,17 @@ void transformEditUi(Transform& transform) {
 	ImGui::PopID();
 }
 
-static std::optional<hyperengine::Mesh> loadMesh(char const* path) {
-	static_assert(sizeof(aiVector3D) == sizeof(glm::vec3));
-
-	Assimp::Importer import; 
-	aiScene const* scene = import.ReadFile(path, aiProcess_JoinIdenticalVertices | aiProcess_Triangulate | aiProcess_RemoveComponent | aiProcess_FlipUVs | aiProcess_OptimizeGraph | aiProcess_OptimizeMeshes | aiProcess_ImproveCacheLocality | aiProcess_FixInfacingNormals);
-
-	if (!scene || scene->mFlags & AI_SCENE_FLAGS_INCOMPLETE || !scene->mRootNode) {
-		std::cerr << import.GetErrorString() << '\n';
-		return std::nullopt;
-	}
-
-	if (scene->mNumMeshes != 1) {
-		std::cerr << "Only one mesh can be exported currently\n";
-		return std::nullopt;
-	}
-
-	aiMesh* mesh = scene->mMeshes[0];
-
-	std::vector<Vertex> vertices;
-	vertices.reserve(mesh->mNumVertices);
-	
-	for (unsigned int i = 0; i < mesh->mNumVertices; ++i) {
-		auto& textureCoord = mesh->mTextureCoords[0][i];
-		vertices.emplace_back(std::bit_cast<glm::vec3>(mesh->mVertices[i]), std::bit_cast<glm::vec3>(mesh->mNormals[i]), glm::vec2(textureCoord.x, textureCoord.y));
-	}
-
-	unsigned char elementPrimitiveWidth;
-	if (mesh->mNumVertices <= std::numeric_limits<uint8_t>::max()) elementPrimitiveWidth = sizeof(uint8_t);
-	else if (mesh->mNumVertices <= std::numeric_limits<uint16_t>::max()) elementPrimitiveWidth = sizeof(uint16_t);
-	else elementPrimitiveWidth = sizeof(uint32_t);
-
-	std::vector<char> elements;
-	elements.reserve(mesh->mNumFaces * 3 * elementPrimitiveWidth);
-
-	GLsizei count = 0;
-
-	for (unsigned int iFace = 0; iFace < mesh->mNumFaces; iFace++) {
-		aiFace face = mesh->mFaces[iFace];
-		if (face.mNumIndices != 3) continue;
-
-		for (unsigned int iElement = 0; iElement < 3; ++iElement) {
-			++count;
-
-			for (unsigned int iReserve = 0; iReserve < elementPrimitiveWidth; ++iReserve)
-				elements.push_back(0);
-
-			// This method is okay for little endian systems, should verify for big endian
-			uint32_t element = face.mIndices[iElement];
-			memcpy(elements.data() + elements.size() - elementPrimitiveWidth, &element, elementPrimitiveWidth);
-		}
-	}
-
-	std::array<hyperengine::Mesh::Attribute, 3> attributes;
-	attributes[0] = { .size = 3, .type = GL_FLOAT, .offset = static_cast<GLuint>(offsetof(Vertex, position)) };
-	attributes[1] = { .size = 3, .type = GL_FLOAT, .offset = static_cast<GLuint>(offsetof(Vertex, normal)) };
-	attributes[2] = { .size = 2, .type = GL_FLOAT, .offset = static_cast<GLuint>(offsetof(Vertex, uv)) };
-
-	return hyperengine::Mesh{{
-			.vertices = std::as_bytes(std::span(vertices)),
-			.vertexStride = sizeof(Vertex),
-			.elements = std::as_bytes(std::span(elements)),
-			.elementStride = elementPrimitiveWidth,
-			.attributes = attributes
-		}};
-}
-
 int main(int argc, char* argv[]) {
+	Transform cameraTransform;
+	Transform objectTransform;
+
 	hyperengine::setupRenderDoc(true);
 
 	hyperengine::Window window{{ .width = 1280, .height = 720, .title = "HyperEngine" }};
 
 	glfwMakeContextCurrent(window.handle());
 	gladLoadGL(&glfwGetProcAddress);
-
-	if (GLAD_GL_KHR_debug) std::cout << "KHR_debug\n";
-	if (GLAD_GL_ARB_texture_storage) std::cout << "ARB_texture_storage\n";
-	if (GLAD_GL_ARB_texture_storage) std::cout << "ARB_direct_state_access\n";
-
+	
 	if (GLAD_GL_KHR_debug) {
 		glEnable(GL_DEBUG_OUTPUT);
 		glEnable(GL_DEBUG_OUTPUT_SYNCHRONOUS);
@@ -214,7 +128,6 @@ int main(int argc, char* argv[]) {
 	ImGuiIO& io = ImGui::GetIO(); (void)io;
 	io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
 	io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
-	//io.ConfigFlags |= ImGuiConfigFlags_ViewportsEnable;
 
 	ImGui::StyleColorsDark();
 
@@ -229,7 +142,7 @@ int main(int argc, char* argv[]) {
 
 	glClearColor(0.7f, 0.8f, 0.9f, 1.0f);
 
-	auto optMesh = loadMesh("varoom.obj");
+	auto optMesh = hyperengine::readMesh("varoom.obj");
 	hyperengine::Mesh& mesh = optMesh.value();
 
 	hyperengine::ShaderProgram program;
@@ -244,39 +157,13 @@ int main(int argc, char* argv[]) {
 		}
 	}
 
-	hyperengine::Texture texture;
-
-	stbi_set_flip_vertically_on_load(true);
-
-	int x, y;
-	stbi_uc* pixels = stbi_load("varoom.png", &x, &y, nullptr, 4);
-
-	if (pixels) {
-		texture = {{
-				.width = x,
-				.height = y,
-				.format = hyperengine::PixelFormat::kRgba8,
-				.minFilter = GL_LINEAR,
-				.magFilter = GL_LINEAR,
-				.wrap = GL_CLAMP_TO_EDGE
-			}};
-
-		texture.upload({
-				.xoffset = 0,
-				.yoffset = 0,
-				.width = x,
-				.height = y,
-				.format = hyperengine::PixelFormat::kRgba8,
-				.pixels = pixels
-			});
-	}
-
-	stbi_image_free(pixels);
+	hyperengine::Texture texture = hyperengine::readTextureImage("varoom.png").value_or(hyperengine::Texture());
 
 	glEnable(GL_DEPTH_TEST);
 	glEnable(GL_CULL_FACE);
 	glCullFace(GL_BACK);
 
+	bool enableQuaternionEditing = false;
 	bool viewImGuiDemoWindow = false;
 	float fov = 80.0f;
 	float near = 0.1f;
@@ -314,11 +201,11 @@ int main(int argc, char* argv[]) {
 				ImGui::DragFloatRange2("Clipping planes", &near, &far, 1.0f, 0.0f, 1000.0f);
 
 				if (ImGui::CollapsingHeader("Camera")) {
-					transformEditUi(cameraTransform);
+					transformEditUi(cameraTransform, enableQuaternionEditing);
 				}
 
 				if (ImGui::CollapsingHeader("Object")) {
-					transformEditUi(objectTransform);
+					transformEditUi(objectTransform, enableQuaternionEditing);
 				}
 			}
 			ImGui::End();
@@ -354,7 +241,6 @@ int main(int argc, char* argv[]) {
 
 			window.swapBuffers();
 		}
-
 	}
 
 	ImGui_ImplOpenGL3_Shutdown();
