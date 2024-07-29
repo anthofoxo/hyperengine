@@ -1,5 +1,7 @@
 #ifdef _WIN32
 #	include <Windows.h>
+#	undef near
+#	undef far
 #endif
 
 #include <glad/gl.h>
@@ -24,11 +26,15 @@
 #define STB_IMAGE_IMPLEMENTATION
 #include <stb_image.h>
 
+#include "he_mesh.hpp"
 #include "he_window.hpp"
 #include "he_rdoc.hpp"
 #include "he_texture.hpp"
 #include "he_shader.hpp"
 #include "he_io.hpp"
+
+#include <array>
+#include <span>
 
 #include <imgui.h>
 #include <backends/imgui_impl_glfw.h>
@@ -118,17 +124,7 @@ void transformEditUi(Transform& transform) {
 	ImGui::PopID();
 }
 
-struct Mesh final {
-	GLuint vao, vbo, ebo;
-	GLenum type;
-	GLsizei count;
-
-	void draw() {
-		glDrawElements(GL_TRIANGLES, count, type, nullptr);
-	}
-};
-
-static std::optional<Mesh> loadMesh(char const* path) {
+static std::optional<hyperengine::Mesh> loadMesh(char const* path) {
 	static_assert(sizeof(aiVector3D) == sizeof(glm::vec3));
 
 	Assimp::Importer import; 
@@ -180,61 +176,18 @@ static std::optional<Mesh> loadMesh(char const* path) {
 		}
 	}
 
-	Mesh glmesh;
+	std::array<hyperengine::Mesh::Attribute, 3> attributes;
+	attributes[0] = { .size = 3, .type = GL_FLOAT, .offset = static_cast<GLuint>(offsetof(Vertex, position)) };
+	attributes[1] = { .size = 3, .type = GL_FLOAT, .offset = static_cast<GLuint>(offsetof(Vertex, normal)) };
+	attributes[2] = { .size = 2, .type = GL_FLOAT, .offset = static_cast<GLuint>(offsetof(Vertex, uv)) };
 
-	if (GLAD_GL_ARB_direct_state_access) {
-
-		glCreateVertexArrays(1, &glmesh.vao);
-
-		glCreateBuffers(1, &glmesh.vbo);
-		glNamedBufferStorage(glmesh.vbo, vertices.size() * sizeof(decltype(vertices)::value_type), vertices.data(), 0);
-
-		glCreateBuffers(1, &glmesh.ebo);
-		glNamedBufferStorage(glmesh.ebo, elements.size() * sizeof(decltype(elements)::value_type), elements.data(), 0);
-
-		GLuint bindingIndex = 0;
-		glVertexArrayVertexBuffer(glmesh.vao, bindingIndex, glmesh.vbo, 0, sizeof(Vertex));
-		glVertexArrayElementBuffer(glmesh.vao, glmesh.ebo);
-
-		glEnableVertexArrayAttrib(glmesh.vao, 0);
-		glEnableVertexArrayAttrib(glmesh.vao, 1);
-		glEnableVertexArrayAttrib(glmesh.vao, 2);
-
-		glVertexArrayAttribFormat(glmesh.vao, 0, 3, GL_FLOAT, GL_FALSE, (GLuint)offsetof(Vertex, position));
-		glVertexArrayAttribFormat(glmesh.vao, 1, 3, GL_FLOAT, GL_FALSE, (GLuint)offsetof(Vertex, normal));
-		glVertexArrayAttribFormat(glmesh.vao, 2, 2, GL_FLOAT, GL_FALSE, (GLuint)offsetof(Vertex, uv));
-
-		glVertexArrayAttribBinding(glmesh.vao, 0, bindingIndex);
-		glVertexArrayAttribBinding(glmesh.vao, 1, bindingIndex);
-		glVertexArrayAttribBinding(glmesh.vao, 2, bindingIndex);
-	}
-	else {
-		glGenVertexArrays(1, &glmesh.vao);
-		glBindVertexArray(glmesh.vao);
-
-		glGenBuffers(1, &glmesh.vbo);
-		glBindBuffer(GL_ARRAY_BUFFER, glmesh.vbo);
-		glBufferData(GL_ARRAY_BUFFER, vertices.size() * sizeof(decltype(vertices)::value_type), vertices.data(), GL_STATIC_DRAW);
-
-		glGenBuffers(1, &glmesh.ebo);
-		glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, glmesh.ebo);
-		glBufferData(GL_ELEMENT_ARRAY_BUFFER, elements.size() * sizeof(decltype(elements)::value_type), elements.data(), GL_STATIC_DRAW);
-
-		glEnableVertexAttribArray(0);
-		glEnableVertexAttribArray(1);
-		glEnableVertexAttribArray(2);
-		glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(Vertex), (void const*)(uintptr_t)offsetof(Vertex, position));
-		glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, sizeof(Vertex), (void const*)(uintptr_t)offsetof(Vertex, normal));
-		glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, sizeof(Vertex), (void const*)(uintptr_t)offsetof(Vertex, uv));
-	}
-
-	glmesh.count = count;
-
-	if (elementPrimitiveWidth == 1) glmesh.type = GL_UNSIGNED_BYTE;
-	else if (elementPrimitiveWidth == 2) glmesh.type = GL_UNSIGNED_SHORT;
-	else glmesh.type = GL_UNSIGNED_INT;
-
-	return glmesh;
+	return hyperengine::Mesh{{
+			.vertices = std::as_bytes(std::span(vertices)),
+			.vertexStride = sizeof(Vertex),
+			.elements = std::as_bytes(std::span(elements)),
+			.elementStride = elementPrimitiveWidth,
+			.attributes = attributes
+		}};
 }
 
 int main(int argc, char* argv[]) {
@@ -277,7 +230,7 @@ int main(int argc, char* argv[]) {
 	glClearColor(0.7f, 0.8f, 0.9f, 1.0f);
 
 	auto optMesh = loadMesh("varoom.obj");
-	Mesh mesh = optMesh.value();
+	hyperengine::Mesh& mesh = optMesh.value();
 
 	hyperengine::ShaderProgram program;
 
@@ -325,6 +278,9 @@ int main(int argc, char* argv[]) {
 	glCullFace(GL_BACK);
 
 	bool viewImGuiDemoWindow = false;
+	float fov = 80.0f;
+	float near = 0.1f;
+	float far = 100.0f;
 
 	while (!glfwWindowShouldClose(window.handle())) {
 		glfwPollEvents();
@@ -354,12 +310,15 @@ int main(int argc, char* argv[]) {
 
 				ImGui::Checkbox("Quaternion editing", &enableQuaternionEditing);
 
+				ImGui::DragFloat("Fov", &fov, 1.0f, 10.0f, 170.0f);
+				ImGui::DragFloatRange2("Clipping planes", &near, &far, 1.0f, 0.0f, 1000.0f);
+
 				if (ImGui::CollapsingHeader("Camera")) {
 					transformEditUi(cameraTransform);
 				}
 
 				if (ImGui::CollapsingHeader("Object")) {
-					transformEditUi(cameraTransform);
+					transformEditUi(objectTransform);
 				}
 			}
 			ImGui::End();
@@ -370,12 +329,12 @@ int main(int argc, char* argv[]) {
 			glViewport(0, 0, width, height);
 
 			glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
-			glBindVertexArray(mesh.vao);
+			mesh.draw();
 			texture.bind(0);
 
 			program.bind();
 
-			glm::mat4 projection = glm::perspective(glm::radians(80.0f), static_cast<float>(width) / static_cast<float>(height), 0.1f, 100.0f);
+			glm::mat4 projection = glm::perspective(glm::radians(fov), static_cast<float>(width) / static_cast<float>(height), near, far);
 
 			program.uniformMat4f("uProjection", projection);
 			program.uniformMat4f("uTransform", objectTransform.get());
@@ -401,10 +360,6 @@ int main(int argc, char* argv[]) {
 	ImGui_ImplOpenGL3_Shutdown();
 	ImGui_ImplGlfw_Shutdown();
 	ImGui::DestroyContext();
-
-	glDeleteVertexArrays(1, &mesh.vao);
-	glDeleteBuffers(1, &mesh.vbo);
-	glDeleteBuffers(1, &mesh.ebo);
 
     return 0;
 }
