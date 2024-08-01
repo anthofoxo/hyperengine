@@ -4,6 +4,7 @@
 #include <string>
 #include <string_view>
 #include <utility>
+#include <vector>
 #include <glad/gl.h>
 #include <glm/glm.hpp>
 
@@ -23,6 +24,7 @@ namespace hyperengine {
 		~ShaderProgram() noexcept;
 
 		inline GLuint handle() const { return mHandle; }
+		inline std::vector<std::string> const& errors() const { return mErrors; }
 
 		GLint getUniformLocation(std::string_view name) const;
 		void uniformMat4f(std::string_view name, glm::mat4 const& v0);
@@ -39,5 +41,6 @@ namespace hyperengine {
 
 		GLuint mHandle = 0;
 		std::unordered_map<std::string, int, Hash, std::equal_to<>> mUniforms;
+		std::vector<std::string> mErrors;
 	};
 }

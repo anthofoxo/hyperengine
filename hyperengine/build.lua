@@ -23,6 +23,7 @@ includedirs {
     "%{wks.location}/vendor/imgui",
     "%{wks.location}/vendor/assimp_config",
 	"%{wks.location}/vendor/assimp/include",
+    "%{wks.location}/vendor/entt/src",
 }
 
 links { "glfw", "glad", "imgui", "assimp" }

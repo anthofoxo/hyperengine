@@ -122,7 +122,7 @@ namespace hyperengine {
 		hyperengine::Texture texture;
 
 		int x, y;
-		stbi_uc* pixels = stbi_load("varoom.png", &x, &y, nullptr, 4);
+		stbi_uc* pixels = stbi_load(filepath, &x, &y, nullptr, 4);
 
 		if (!pixels) return std::nullopt;
 

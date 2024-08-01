@@ -1,9 +1,16 @@
+#include <Windows.h>
+
 namespace hyperengine {
 	bool isWsl() { return false; }
+
+#ifndef HE_IMPL_USING_STD_DEBUGGING
+	bool isDebuggerPresent() {
+		return ::IsDebuggerPresent();
+	}
+#endif
 }
 
 #ifdef HE_ENTRY_WINMAIN
-#include <Windows.h> // WINAPI, WinMain, _In_, _In_opt_, HINSTANCE
 #include <stdlib.h> // __argc, __argv
 
 extern int main(int, char* []);

@@ -11,6 +11,7 @@ namespace {
 #define OUTPUT(type, name, index)
 #define VARYING(type, name) out type name
 #define UNIFORM(type, name) uniform type name
+#define CONST(type, name, value) const type name = value
 #line 1
 )";
 
@@ -20,10 +21,11 @@ namespace {
 #define OUTPUT(type, name, index) layout(location = index) out type name
 #define VARYING(type, name) in type name
 #define UNIFORM(type, name) uniform type name
+#define CONST(type, name, value) const type name = value
 #line 1
 )";
 
-	GLuint makeShader(GLenum type, GLchar const* string, GLint length) {
+	GLuint makeShader(GLenum type, GLchar const* string, GLint length, std::vector<std::string>& errors) {
 		GLuint shader = glCreateShader(type);
 		glShaderSource(shader, 1, &string, &length);
 		glCompileShader(shader);
@@ -35,8 +37,7 @@ namespace {
 			std::string error;
 			error.resize(param);
 			glGetShaderInfoLog(shader, param, nullptr, error.data());
-			std::cerr << error << '\n';
-			psnip_trap();
+			errors.push_back(error);
 		}
 
 		return shader;
@@ -50,8 +51,8 @@ namespace hyperengine {
 		std::string fragSource = std::string(gFragHeader) + std::string(info.source);
 		//
 
-		GLuint vert = makeShader(GL_VERTEX_SHADER, vertSource.data(), static_cast<int>(vertSource.size()));
-		GLuint frag = makeShader(GL_FRAGMENT_SHADER, fragSource.data(), static_cast<int>(fragSource.size()));
+		GLuint vert = makeShader(GL_VERTEX_SHADER, vertSource.data(), static_cast<int>(vertSource.size()), mErrors);
+		GLuint frag = makeShader(GL_FRAGMENT_SHADER, fragSource.data(), static_cast<int>(fragSource.size()), mErrors);
 
 		mHandle = glCreateProgram();
 		glAttachShader(mHandle, vert);
@@ -69,8 +70,12 @@ namespace hyperengine {
 			std::string error;
 			error.resize(param);
 			glGetProgramInfoLog(mHandle, param, nullptr, error.data());
-			std::cerr << error << '\n';
-			psnip_trap();
+			mErrors.push_back(error);
+		}
+
+		if (!mErrors.empty()) {
+			for(auto const& error : mErrors)
+				std::cerr << error << '\n';
 		}
 
 		// Read all uniforms ahead of time, no need to constantly look these up every frame
@@ -97,6 +102,7 @@ namespace hyperengine {
 	ShaderProgram& ShaderProgram::operator=(ShaderProgram&& other) noexcept {
 		std::swap(mHandle, other.mHandle);
 		std::swap(mUniforms, other.mUniforms);
+		std::swap(mErrors, other.mErrors);
 		return *this;
 	}
 

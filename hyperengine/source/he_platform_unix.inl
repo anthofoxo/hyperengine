@@ -12,4 +12,11 @@ namespace hyperengine {
 		std::string_view result = uname_info.release;
 		return (result.find("microsoft") != std::string_view::npos) && (result.find("WSL2") != std::string_view::npos);
 	}
+
+#ifndef HE_IMPL_USING_STD_DEBUGGING
+	bool isDebuggerPresent() {
+		// TODO: Needs implmentation
+		return false;
+	}
+#endif
 }
