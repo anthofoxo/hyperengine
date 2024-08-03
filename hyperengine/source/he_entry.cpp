@@ -971,9 +971,6 @@ struct Engine final {
 								gameObject.transform.set(matrix);
 							}
 						}
-
-						
-
 						
 						if (ImGui::IsWindowFocused() && ImGui::IsWindowHovered() && ImGui::IsMouseDown(ImGuiMouseButton_Right)) {
 
@@ -999,11 +996,6 @@ struct Engine final {
 							cameraTransformClass->orientation = glm::rotate(cameraTransformClass->orientation, glm::radians(drag.x * -0.3f), glm::vec3(worldUp));
 							cameraTransformClass->orientation = glm::rotate(cameraTransformClass->orientation, glm::radians(drag.y * -0.3f), { 1, 0, 0 });
 						}
-						
-
-						
-
-						
 					}
 					else
 						ImGui::TextUnformatted("No camera found");
