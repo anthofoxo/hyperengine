@@ -13,3 +13,6 @@
 [submodule "vendor/entt"]
 	path = vendor/entt
 	url = https://github.com/skypjack/entt
+[submodule "vendor/lua"]
+	path = vendor/lua
+	url = https://github.com/anthofoxo/lua
