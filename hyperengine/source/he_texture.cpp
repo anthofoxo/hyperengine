@@ -62,10 +62,13 @@ namespace hyperengine {
 
 		if (GLAD_GL_KHR_debug)
 			glObjectLabel(GL_TEXTURE, mHandle, static_cast<GLsizei>(info.label.size()), info.label.data());
+
+		mOrigin = std::string(info.origin);
 	}
 
 	Texture& Texture::operator=(Texture&& other) noexcept {
 		std::swap(mHandle, other.mHandle);
+		std::swap(mOrigin, other.mOrigin);
 		return *this;
 	}
 

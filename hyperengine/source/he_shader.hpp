@@ -13,6 +13,7 @@ namespace hyperengine {
 	public:
 		struct CreateInfo final {
 			std::string_view source;
+			std::string_view origin;
 		};
 
 		ShaderProgram() = default;
@@ -23,6 +24,7 @@ namespace hyperengine {
 		ShaderProgram& operator=(ShaderProgram&& other) noexcept;
 		~ShaderProgram() noexcept;
 
+		inline std::string const& origin() const { return mOrigin; }
 		inline bool cull() const { return mCull; }
 		inline GLuint handle() const { return mHandle; }
 		inline std::vector<std::string> const& errors() const { return mErrors; }
@@ -42,6 +44,7 @@ namespace hyperengine {
 			std::size_t operator()(std::string const& str) const { return hash_type{}(str); }
 		};
 
+		std::string mOrigin;
 		GLuint mHandle = 0;
 		std::unordered_map<std::string, int, Hash, std::equal_to<>> mUniforms;
 		std::vector<std::string> mErrors;

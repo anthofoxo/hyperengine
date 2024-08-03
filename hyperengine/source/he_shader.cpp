@@ -113,9 +113,12 @@ namespace hyperengine {
 				mUniforms.insert(std::make_pair(std::string(uniformName.get(), length), location));
 			}
 		}
+
+		mOrigin = std::string(info.origin);
 	}
 
 	ShaderProgram& ShaderProgram::operator=(ShaderProgram&& other) noexcept {
+		std::swap(mOrigin, other.mOrigin);
 		std::swap(mHandle, other.mHandle);
 		std::swap(mUniforms, other.mUniforms);
 		std::swap(mErrors, other.mErrors);

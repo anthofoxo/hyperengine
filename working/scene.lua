@@ -46,5 +46,21 @@ return {
     mesh    = "pine.obj",
     texture = "pine.png",
     shader  = "cutout.glsl"
-  }
+  },
+  {
+    translation = { 3, 0, -3 },
+    scale = { 1, 1, 1 },
+    name    = "fox",
+    mesh    = "fox.obj",
+    texture = "fox.png",
+    shader  = "opaque.glsl"
+  },
+  {
+    translation = { -8, -7, -12 },
+    scale = { 1, 1, 1 },
+    name    = "fern",
+    mesh    = "fern.obj",
+    texture = "fern.png",
+    shader  = "cutout.glsl"
+  },
 }

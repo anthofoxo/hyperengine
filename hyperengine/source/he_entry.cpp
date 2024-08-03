@@ -44,6 +44,7 @@
 #include <backends/imgui_impl_glfw.h>
 #include <backends/imgui_impl_opengl3.h>
 #include <misc/cpp/imgui_stdlib.h>
+#include <ImGuizmo.h>
 
 #include <entt/entity/registry.hpp>
 #include <entt/entity/handle.hpp>
@@ -201,6 +202,7 @@ static void imguiBeginFrame() {
 	ImGui_ImplGlfw_NewFrame();
 	ImGui::NewFrame();
 	ImGui::GetIO().ConfigDebugIsDebuggerPresent = hyperengine::isDebuggerPresent();
+	ImGuizmo::BeginFrame();
 }
 
 static void imguiEndFrame() {
@@ -332,7 +334,7 @@ struct ResourceManager final {
 		if (!shader.has_value()) return;
 
 		// reload shader, will repopulate errors
-		program = { {.source = shader.value() } };
+		program = {{ .source = shader.value(), .origin = pathStr }};
 
 		// Setup debug editor
 		std::unordered_map<int, std::set<std::string>> parsed;
@@ -547,7 +549,12 @@ struct Engine final {
 
 				if (MeshFilterComponent* component = mRegistry.try_get<MeshFilterComponent>(selected)) {
 					if (ImGui::CollapsingHeader("Mesh Filter")) {
-						if (ImGui::Button("Select.."))
+						if (component->mesh)
+							ImGui::LabelText("Resource", "%s", component->mesh->origin().c_str());
+						else
+							ImGui::LabelText("Resource", "%s", "<null>");
+
+						if (ImGui::Button("Select..."))
 							ImGui::OpenPopup("meshFilterSelect");
 
 						if (ImGui::BeginPopup("meshFilterSelect")) {
@@ -568,7 +575,12 @@ struct Engine final {
 
 				if (MeshRendererComponent* component = mRegistry.try_get<MeshRendererComponent>(selected)) {
 					if (ImGui::CollapsingHeader("Mesh Renderer")) {
-						if (ImGui::Button("Select shader.."))
+						if (component->shader)
+							ImGui::LabelText("Resource", "%s", component->shader->origin().c_str());
+						else
+							ImGui::LabelText("Resource", "%s", "<null>");
+
+						if (ImGui::Button("Select shader..."))
 							ImGui::OpenPopup("meshRendererShaderSelect");
 
 						if (ImGui::BeginPopup("meshRendererShaderSelect")) {
@@ -582,7 +594,12 @@ struct Engine final {
 							ImGui::EndPopup();
 						}
 
-						if (ImGui::Button("Select texture.."))
+						if (component->texture)
+							ImGui::LabelText("Resource", "%s", component->texture->origin().c_str());
+						else
+							ImGui::LabelText("Resource", "%s", "<null>");
+
+						if (ImGui::Button("Select texture..."))
 							ImGui::OpenPopup("meshRendererTextureSelect");
 
 						if (ImGui::BeginPopup("meshRendererTextureSelect")) {
@@ -656,6 +673,7 @@ struct Engine final {
 				ImGui::MenuItem("Hierarchy", nullptr, &mViewHierarchy);
 				ImGui::MenuItem("Properties", nullptr, &mViewProperties);
 				ImGui::MenuItem("Viewport", nullptr, &mViewViewport);
+				ImGui::MenuItem("Resource Manager", nullptr, &mViewResourceManager);
 				ImGui::Separator();
 				ImGui::MenuItem("Dear ImGui Demo", nullptr, &mViewImGuiDemoWindow);
 
@@ -665,9 +683,26 @@ struct Engine final {
 			ImGui::EndMainMenuBar();
 		}
 
-		if (ImGui::Begin("Debug", nullptr, ImGuiWindowFlags_MenuBar)) {
+		if (ImGui::Begin("Debug")) {
 			ImGui::Checkbox("Wireframe", &mWireframe);
 			ImGui::ColorEdit3("Sky color", glm::value_ptr(mSkyColor));
+
+			ImGui::SeparatorText("Gizmos");
+
+			if (ImGui::RadioButton("Translate", mOperation == ImGuizmo::TRANSLATE))
+				mOperation = ImGuizmo::TRANSLATE;
+			ImGui::SameLine();
+			if (ImGui::RadioButton("Rotate", mOperation == ImGuizmo::ROTATE))
+				mOperation = ImGuizmo::ROTATE;
+			ImGui::SameLine();
+			if (ImGui::RadioButton("Scale", mOperation == ImGuizmo::SCALE))
+				mOperation = ImGuizmo::SCALE;
+
+			if (ImGui::RadioButton("Local", mMode == ImGuizmo::LOCAL))
+				mMode = ImGuizmo::LOCAL;
+			ImGui::SameLine();
+			if (ImGui::RadioButton("World", mMode == ImGuizmo::WORLD))
+				mMode = ImGuizmo::WORLD;
 		}
 		ImGui::End();
 
@@ -694,42 +729,43 @@ struct Engine final {
 			}
 		}
 
-		if (ImGui::Begin("Resource Manager")) {
-			if (ImGui::CollapsingHeader("Meshes")) {
-				for (auto& [k, v] : mResourceManager.mMeshes) {
-					if (ImGui::TreeNodeEx(k.c_str())) {
-						ImGui::LabelText("Strong refs", "%d", v.use_count());
-						ImGui::TreePop();
+		if (mViewResourceManager) {
+			if (ImGui::Begin("Resource Manager"), &mViewResourceManager) {
+				if (ImGui::CollapsingHeader("Meshes")) {
+					for (auto& [k, v] : mResourceManager.mMeshes) {
+						if (ImGui::TreeNodeEx(k.c_str())) {
+							ImGui::LabelText("Strong refs", "%d", v.use_count());
+							ImGui::TreePop();
+						}
 					}
 				}
-			}
-			if (ImGui::CollapsingHeader("Textures")) {
-				for (auto& [k, v] : mResourceManager.mTextures) {
-					if (ImGui::TreeNodeEx(k.c_str())) {
-						ImGui::LabelText("Strong refs", "%d", v.use_count());
-						if (auto strongRef = v.lock())
-							ImGui::Image((void*)(uintptr_t)strongRef->handle(), { 128, 128 }, { 0, 1 }, { 1, 0 });;
-						ImGui::TreePop();
+				if (ImGui::CollapsingHeader("Textures")) {
+					for (auto& [k, v] : mResourceManager.mTextures) {
+						if (ImGui::TreeNodeEx(k.c_str())) {
+							ImGui::LabelText("Strong refs", "%d", v.use_count());
+							if (auto strongRef = v.lock())
+								ImGui::Image((void*)(uintptr_t)strongRef->handle(), { 128, 128 }, { 0, 1 }, { 1, 0 });;
+							ImGui::TreePop();
+						}
 					}
 				}
-			}
-			if (ImGui::CollapsingHeader("Shaders")) {
-				for (auto& [k, v] : mResourceManager.mShaders) {
-					if (ImGui::TreeNodeEx(k.c_str())) {
-						ImGui::LabelText("Strong refs", "%d", v.use_count());
-						ImGui::Checkbox("Editor enabled", &mResourceManager.mShaderEditor[k].enabled);
+				if (ImGui::CollapsingHeader("Shaders")) {
+					for (auto& [k, v] : mResourceManager.mShaders) {
+						if (ImGui::TreeNodeEx(k.c_str())) {
+							ImGui::LabelText("Strong refs", "%d", v.use_count());
+							ImGui::Checkbox("Editor enabled", &mResourceManager.mShaderEditor[k].enabled);
 
-						ImGui::TreePop();
+							ImGui::TreePop();
+						}
 					}
 				}
 			}
+			ImGui::End();
 		}
-		ImGui::End();
-
-		drawGuiHierarchy();
 
 		
 
+		drawGuiHierarchy();
 		drawGuiProperties();
 
 		if (mViewImGuiDemoWindow)
@@ -780,11 +816,10 @@ struct Engine final {
 
 					// RENDER THE SCENE
 					bool cameraFound = false;
+					glm::mat4 cameraTransform;
+					glm::mat4 cameraProjection;
+					float farPlane;
 					{
-						glm::mat4 cameraTransform;
-						glm::mat4 cameraProjection;
-						float farPlane;
-
 						// Find camera, set vals
 						for (auto&& [entity, gameObject, camera] : mRegistry.view<GameObjectComponent, CameraComponent>().each()) {
 							cameraTransform = gameObject.transform.get();
@@ -828,8 +863,21 @@ struct Engine final {
 
 					glBindFramebuffer(GL_FRAMEBUFFER, 0);
 
-					if (cameraFound)
+					if (cameraFound) {
 						ImGui::Image((void*)(uintptr_t)mFramebufferColor.handle(), ImGui::GetContentRegionAvail(), { 0, 1 }, { 1, 0 });
+
+						if (selected != entt::null) {
+							GameObjectComponent& gameObject = mRegistry.get<GameObjectComponent>(selected);
+							glm::mat4 matrix = gameObject.transform.get();
+
+							ImGuizmo::SetDrawlist();
+							ImGuizmo::SetRect(ImGui::GetWindowPos().x, ImGui::GetWindowPos().y, ImGui::GetWindowWidth(), ImGui::GetWindowHeight());
+
+							if (ImGuizmo::Manipulate(glm::value_ptr(glm::inverse(cameraTransform)), glm::value_ptr(cameraProjection), mOperation, mMode, glm::value_ptr(matrix))) {
+								gameObject.transform.set(matrix);
+							}
+						}
+					}
 					else
 						ImGui::TextUnformatted("No camera found");
 				}
@@ -860,8 +908,11 @@ struct Engine final {
 	bool mViewHierarchy = true;
 	bool mViewProperties = true;
 	bool mViewViewport = true;
+	bool mViewResourceManager = false;
 	bool mViewImGuiDemoWindow = false;
 	glm::ivec2 mFramebufferSize;
+	ImGuizmo::OPERATION mOperation = ImGuizmo::OPERATION::TRANSLATE;
+	ImGuizmo::MODE mMode = ImGuizmo::MODE::LOCAL;
 };
 
 int main(int argc, char* argv[]) {

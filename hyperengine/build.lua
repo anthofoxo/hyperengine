@@ -21,13 +21,14 @@ includedirs {
     "%{wks.location}/vendor/glad/include",
     "%{wks.location}/vendor/glm",
     "%{wks.location}/vendor/imgui",
+    "%{wks.location}/vendor/imguizmo",
     "%{wks.location}/vendor/assimp_config",
 	"%{wks.location}/vendor/assimp/include",
     "%{wks.location}/vendor/entt/src",
     "%{wks.location}/vendor/lua/src",
 }
 
-links { "glfw", "glad", "imgui", "assimp", "lua" }
+links { "glfw", "glad", "imgui", "imguizmo", "assimp", "lua" }
 
 filter "system:windows"
 files "%{prj.location}/*.rc"

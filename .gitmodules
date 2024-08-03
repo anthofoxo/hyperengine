@@ -16,3 +16,6 @@
 [submodule "vendor/lua"]
 	path = vendor/lua
 	url = https://github.com/anthofoxo/lua
+[submodule "vendor/imguizmo"]
+	path = vendor/imguizmo
+	url = https://github.com/CedricGuillemet/ImGuizmo

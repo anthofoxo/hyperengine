@@ -68,6 +68,8 @@ namespace hyperengine {
 		}
 
 		mCount = info.elements.size();
+
+		mOrigin = std::string(info.origin);
 	}
 
 	Mesh& Mesh::operator=(Mesh&& other) noexcept {
@@ -76,6 +78,7 @@ namespace hyperengine {
 		std::swap(mEbo, other.mEbo);
 		std::swap(mCount, other.mCount);
 		std::swap(mType, other.mType);
+		std::swap(mOrigin, other.mOrigin);
 		return *this;
 	}
 

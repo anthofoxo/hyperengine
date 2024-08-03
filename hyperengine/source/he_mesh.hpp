@@ -1,5 +1,7 @@
 #pragma once
 
+#include <string>
+#include <string_view>
 #include <span>
 #include <glad/gl.h>
 
@@ -18,7 +20,10 @@ namespace hyperengine {
 			std::span<const std::byte> elements;
 			size_t elementStride;
 			std::span<const Attribute> attributes;
+			std::string_view origin;
 		};
+
+		inline std::string const& origin() const { return mOrigin; }
 
 		constexpr Mesh() noexcept = default;
 		Mesh(CreateInfo const& info);
@@ -30,6 +35,7 @@ namespace hyperengine {
 
 		void draw();
 	private:
+		std::string mOrigin;
 		GLuint mVao = 0, mVbo = 0, mEbo = 0;
 		GLsizei mCount = 0;
 		GLenum mType = 0;

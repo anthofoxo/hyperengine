@@ -2,7 +2,7 @@
 Small game engine written in C++
 
 ## Cloning
-We use submodules, clone with submodules!
+We use submodules, clone with submodules! `--recurse-submodules`
 
 ## Building
 We use [Premake5](https://premake.github.io/) as a build system. Have this installed.
@@ -45,3 +45,4 @@ See shader sources in `./working` for examples.
 * [assimp v5.0.1](https://github.com/assimp/assimp/tree/v5.0.1)
 * [EnTT v3.13.2](https://github.com/skypjack/entt/tree/v3.13.2)
 * [Lua 5.4.6](https://github.com/anthofoxo/lua/tree/5.4.6)
+* [ImGuizmo ba662b1](https://github.com/CedricGuillemet/ImGuizmo/tree/ba662b119d64f9ab700bb2cd7b2781f9044f5565)
