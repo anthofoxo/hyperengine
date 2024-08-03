@@ -38,6 +38,7 @@
 #include "he_texture.hpp"
 #include "he_shader.hpp"
 #include "he_io.hpp"
+#include "he_util.hpp"
 
 #include <imgui.h>
 #include <backends/imgui_impl_glfw.h>
@@ -49,8 +50,76 @@
 
 #include <TextEditor.h>
 
+#include <lua.hpp>
+
 #define MINIAUDIO_IMPLEMENTATION
 #include <miniaudio.h>
+
+struct AudioEngine final {
+	void init(std::string_view preferredDevice) {
+		if (ma_context_init(nullptr, 0, nullptr, &mContext) != MA_SUCCESS) {
+			// Error.
+		}
+
+		ma_device_info* pPlaybackInfos;
+		ma_uint32 playbackCount;
+		if (ma_context_get_devices(&mContext, &pPlaybackInfos, &playbackCount, nullptr, nullptr) != MA_SUCCESS) {
+			// Error.
+		}
+
+		bool isDeviceChosen = false;
+		ma_uint32 chosenPlaybackDeviceIndex = 0;
+
+		for (ma_uint32 iDevice = 0; iDevice < playbackCount; iDevice += 1) {
+			if (std::string_view(pPlaybackInfos[iDevice].name) == preferredDevice) {
+				chosenPlaybackDeviceIndex = iDevice;
+				isDeviceChosen = true;
+			}
+		}
+
+		if (!isDeviceChosen) {
+			for (ma_uint32 iDevice = 0; iDevice < playbackCount; iDevice += 1) {
+				if (pPlaybackInfos[iDevice].isDefault) {
+					chosenPlaybackDeviceIndex = iDevice;
+					isDeviceChosen = true;
+					break;
+				}
+			}
+		}
+
+		mDeviceName = pPlaybackInfos[chosenPlaybackDeviceIndex].name;
+
+		ma_device_config deviceConfig = ma_device_config_init(ma_device_type_playback);
+		deviceConfig.playback.pDeviceID = &pPlaybackInfos[chosenPlaybackDeviceIndex].id;
+		deviceConfig.pUserData = &mEngine;
+
+		deviceConfig.dataCallback = [](ma_device* pDevice, void* pOutput, void const* pInput, ma_uint32 frameCount) {
+			ma_engine_read_pcm_frames(static_cast<ma_engine*>(pDevice->pUserData), pOutput, frameCount, nullptr);
+		};
+
+		if (ma_device_init(&mContext, &deviceConfig, &mDevice) != MA_SUCCESS) {
+			// Error.
+		}
+
+		ma_engine_config engineConfig = ma_engine_config_init();
+		engineConfig.pDevice = &mDevice;
+
+		if (ma_engine_init(&engineConfig, &mEngine) != MA_SUCCESS) {
+			// Error.
+		}
+	}
+
+	void uninit() {
+		ma_engine_uninit(&mEngine);
+		ma_device_uninit(&mDevice);
+		ma_context_uninit(&mContext);
+	}
+
+	std::string mDeviceName;
+	ma_context mContext;
+	ma_device mDevice;
+	ma_engine mEngine;
+};
 
 #define HE_IMPL_EXPAND(x) case x: return #x
 static std::string_view glConstantToString(GLuint val) {
@@ -81,7 +150,7 @@ static std::string_view glConstantToString(GLuint val) {
 
 static void message_callback(GLenum source, GLenum type, GLuint id, GLenum severity, GLsizei length, GLchar const* message, void const* user_param) {
 	std::cout << glConstantToString(source) << ", " << glConstantToString(type) << ", " << glConstantToString(severity) << ", " << id << ": " << message << '\n';
-	hyperengine::breakpointIfDebugging();
+	//hyperengine::breakpointIfDebugging();
 }
 
 struct Transform final {
@@ -101,22 +170,6 @@ struct Transform final {
 		glm::decompose(mat, scale, orientation, translation, skew, perspective);
 	}
 };
-
-static void transformEditUi(Transform& transform) {
-	ImGui::PushID(&transform);
-	ImGui::DragFloat3("Translation", glm::value_ptr(transform.translation), 0.1f);
-	glm::vec3 oldEuler = glm::degrees(glm::eulerAngles(transform.orientation));
-	glm::vec3 newEuler = oldEuler;
-	if (ImGui::DragFloat3("Rotation", glm::value_ptr(newEuler))) {
-		glm::vec3 deltaEuler = glm::radians(newEuler - oldEuler);
-
-		transform.orientation = glm::rotate(transform.orientation, deltaEuler.x, glm::vec3(1, 0, 0));
-		transform.orientation = glm::rotate(transform.orientation, deltaEuler.y, glm::vec3(0, 1, 0));
-		transform.orientation = glm::rotate(transform.orientation, deltaEuler.z, glm::vec3(0, 0, 1));
-	}
-	ImGui::DragFloat3("Scale", glm::value_ptr(transform.scale), 0.1f);
-	ImGui::PopID();
-}
 
 static void initImGui(hyperengine::Window& window) {
 	IMGUI_CHECKVERSION();
@@ -147,9 +200,7 @@ static void imguiBeginFrame() {
 	ImGui_ImplOpenGL3_NewFrame();
 	ImGui_ImplGlfw_NewFrame();
 	ImGui::NewFrame();
-#ifdef _WIN32
-	ImGui::GetIO().ConfigDebugIsDebuggerPresent = IsDebuggerPresent();
-#endif
+	ImGui::GetIO().ConfigDebugIsDebuggerPresent = hyperengine::isDebuggerPresent();
 }
 
 static void imguiEndFrame() {
@@ -230,30 +281,17 @@ auto glslShaderDef() {
 	return langDef;
 }
 
-size_t stringSplit(std::string const& txt, std::vector<std::string>& strs, char ch) {
-	size_t pos = txt.find(ch);
-	size_t initialPos = 0;
-	strs.clear();
-
-	// Decompose statement
-	while (pos != std::string::npos) {
-		strs.push_back(txt.substr(initialPos, pos - initialPos));
-		initialPos = pos + 1;
-
-		pos = txt.find(ch, initialPos);
-	}
-
-	strs.push_back(txt.substr(initialPos, std::min(pos, txt.size()) - initialPos + 1));
-
-	return strs.size();
-}
+struct TextEditorInfo {
+	TextEditor editor;
+	bool enabled = false;
+};
 
 struct ResourceManager final {
 	hyperengine::UnorderedStringMap<std::weak_ptr<hyperengine::Mesh>> mMeshes;
 	hyperengine::UnorderedStringMap<std::weak_ptr<hyperengine::Texture>> mTextures;
 	hyperengine::UnorderedStringMap<std::weak_ptr<hyperengine::ShaderProgram>> mShaders;
 
-	hyperengine::UnorderedStringMap<TextEditor> mShaderEditor;
+	hyperengine::UnorderedStringMap<TextEditorInfo> mShaderEditor;
 
 	std::shared_ptr<hyperengine::Mesh> getMesh(std::string_view path) {
 		auto it = mMeshes.find(path);
@@ -304,7 +342,7 @@ struct ResourceManager final {
 		if (!program.errors().empty()) {
 			for (auto const& error : program.errors()) {
 				std::vector<std::string> lines;
-				stringSplit(error, lines, '\n');
+				hyperengine::split(error, lines, '\n');
 
 				// Attempt to parse information from line
 				for (auto const& line : lines) {
@@ -335,7 +373,7 @@ struct ResourceManager final {
 			markers.insert(std::make_pair(k, str));
 		}
 		editor.SetErrorMarkers(markers);
-		mShaderEditor[pathStr] = editor;
+		mShaderEditor[pathStr] = { editor, !parsed.empty() };
 	}
 
 	std::shared_ptr<hyperengine::ShaderProgram> getShaderProgram(std::string_view path) {
@@ -357,18 +395,28 @@ struct ResourceManager final {
 };
 
 struct GameObjectComponent final {
-	bool spin = false;
-	std::string name = "unnamed";
+	std::string name;
 	Transform transform;
-	std::shared_ptr<hyperengine::Mesh> mesh;
-	std::shared_ptr<hyperengine::Texture> texture;
-	std::shared_ptr<hyperengine::ShaderProgram> shader;
 
 	GameObjectComponent() {
 		std::stringstream ss;
-		ss << "unnamed " << std::hex << (void*)this;
+		ss << "unnamed 0x" << std::hex << (void*)this;
 		name = ss.str();
 	}
+};
+
+struct MeshFilterComponent {
+	std::shared_ptr<hyperengine::Mesh> mesh;
+};
+
+struct MeshRendererComponent {
+	std::shared_ptr<hyperengine::Texture> texture;
+	std::shared_ptr<hyperengine::ShaderProgram> shader;
+};
+
+struct CameraComponent {
+	glm::vec2 clippingPlanes = { 0.1f, 100.0f };
+	float fov = 80.0f;
 };
 
 struct Engine final {
@@ -385,34 +433,68 @@ struct Engine final {
 			glDebugMessageControl(GL_DONT_CARE, GL_DONT_CARE, GL_DEBUG_SEVERITY_NOTIFICATION, 0, nullptr, GL_FALSE);
 		}
 
+		std::cout << glGetString(GL_RENDERER) << '\n';
+		std::cout << glGetString(GL_VENDOR) << '\n';
+		std::cout << glGetString(GL_VERSION) << '\n';
+		std::cout << glGetString(GL_SHADING_LANGUAGE_VERSION) << '\n';
+
 		glfwSetWindowUserPointer(mWindow.handle(), this);
 		glfwSetWindowCloseCallback(mWindow.handle(), [](GLFWwindow* window) {
 			static_cast<Engine*>(glfwGetWindowUserPointer(window))->mRunning = false;
 		});
 
 		initImGui(mWindow);
-
-		glClearColor(0.7f, 0.8f, 0.9f, 1.0f);
-
-		{
-			entt::handle entity{ mRegistry, mRegistry.create() };
-			GameObjectComponent& gameObject = entity.emplace<GameObjectComponent>();
-			gameObject.mesh = mResourceManager.getMesh("varoom.obj");
-			gameObject.shader = mResourceManager.getShaderProgram("shader.glsl");
-			gameObject.texture = mResourceManager.getTexture("varoom.png");
-			gameObject.transform.translation = glm::vec3(-1, 0, 0);
-		}
+		mAudioEngine.init("");
 
 		{
 			entt::handle entity{ mRegistry, mRegistry.create() };
 			GameObjectComponent& gameObject = entity.emplace<GameObjectComponent>();
-			gameObject.mesh = mResourceManager.getMesh("dragon.obj");
-			gameObject.shader = mResourceManager.getShaderProgram("shader.glsl");
-			gameObject.texture = mResourceManager.getTexture("color.png");
-			gameObject.transform.translation = glm::vec3(1, 0, 0);
-			gameObject.transform.scale = glm::vec3(0.2f);
-			gameObject.spin = true;
+			gameObject.transform.translation = glm::vec3(0, 1, 3);
+			gameObject.name = "MainCamera";
+			CameraComponent& camera = entity.emplace<CameraComponent>();
 		}
+
+		lua_State* L = luaL_newstate();
+		luaL_dofile(L, "scene.lua"); // Run file, resulting table is pushed on stack
+		int t = lua_gettop(L); // Table index
+		lua_pushnil(L); // First key
+		while (lua_next(L, t) != 0) {
+			/* 'key' (at index -2) and 'value' (at index -1) */
+			entt::entity entity = mRegistry.create();
+			GameObjectComponent& gameObject = mRegistry.emplace<GameObjectComponent>(entity);
+			MeshFilterComponent& meshFilter = mRegistry.emplace<MeshFilterComponent>(entity);
+			MeshRendererComponent& meshRenderer = mRegistry.emplace<MeshRendererComponent>(entity);
+
+			lua_getfield(L, -1, "name");
+			gameObject.name = lua_tostring(L, -1);
+			lua_pop(L, 1);
+
+			lua_getfield(L, -1, "mesh");
+			meshFilter.mesh = mResourceManager.getMesh(lua_tostring(L, -1));
+			lua_pop(L, 1);
+
+			lua_getfield(L, -1, "texture");
+			meshRenderer.texture = mResourceManager.getTexture(lua_tostring(L, -1));
+			lua_pop(L, 1);
+
+			lua_getfield(L, -1, "shader");
+			meshRenderer.shader = mResourceManager.getShaderProgram(lua_tostring(L, -1));
+			lua_pop(L, 1);
+
+			lua_getfield(L, -1, "translation");
+			gameObject.transform.translation = hyperengine::luaToVec3(L);
+			lua_pop(L, 1);
+
+			lua_getfield(L, -1, "scale");
+			gameObject.transform.scale = hyperengine::luaToVec3(L);
+			lua_pop(L, 1);
+
+			lua_pop(L, 1); // remove value
+		}
+
+		lua_pop(L, 1); // Pop table
+
+		lua_close(L);
 
 		glEnable(GL_DEPTH_TEST);
 		glEnable(GL_CULL_FACE);
@@ -436,57 +518,118 @@ struct Engine final {
 		}
 
 		destroyImGui();
+		mAudioEngine.uninit();
 	}
 
-	void drawUi() {
-		if (ImGui::Begin("Debug", nullptr, ImGuiWindowFlags_MenuBar)) {
-			if (ImGui::BeginMenuBar()) {
-				if (ImGui::BeginMenu("View")) {
-					ImGui::MenuItem("ImGui Demo Window", nullptr, &mViewImGuiDemoWindow);
+	void drawGuiProperties() {
+		if (!mViewProperties) return;
 
-					ImGui::EndMenu();
-				}
-
-				ImGui::EndMenuBar();
-			}
-
-			ImGui::DragFloat("Fov", &mFov, 1.0f, 10.0f, 170.0f);
-			ImGui::DragFloatRange2("Clipping planes", &mNear, &mFar, 1.0f, 0.0f, 1000.0f);
-
-			if (ImGui::CollapsingHeader("Camera"))
-				transformEditUi(mCameraTransform);		
-		}
-		ImGui::End();
-
-		for (auto& [k, v] : mResourceManager.mShaderEditor) {
-			if (ImGui::Begin(k.c_str(), nullptr, ImGuiWindowFlags_None)) {
-				if (ImGui::Button("Save and reload")) {
-					std::ofstream file(k.c_str(), std::ofstream::out | std::ofstream::binary);
-					file.write(v.GetText().data(), glm::max<size_t>(v.GetText().size() - 1, 0)); // getText returns an extra endline at the end
-					file.close();
-					// File is closed and written
-
-					// If shader is in memory, reload it
-					auto it = mResourceManager.mShaders.find(k);
-					if (it != mResourceManager.mShaders.end()) {
-						if (std::shared_ptr<hyperengine::ShaderProgram> program = it->second.lock())
-							mResourceManager.reloadShader(k, *program);
+		if (ImGui::Begin("Properties", &mViewProperties)) {
+			if (selected != entt::null) {
+				if (GameObjectComponent* component = mRegistry.try_get<GameObjectComponent>(selected)) {
+					ImGui::InputText("Name", &component->name);
+					if (ImGui::CollapsingHeader("Transform")) {
+						ImGui::DragFloat3("Translation", glm::value_ptr(component->transform.translation), 0.1f);
+						glm::vec3 oldEuler = glm::degrees(glm::eulerAngles(component->transform.orientation));
+						glm::vec3 newEuler = oldEuler;
+						if (ImGui::DragFloat3("Rotation", glm::value_ptr(newEuler))) {
+							glm::vec3 deltaEuler = glm::radians(newEuler - oldEuler);
+							component->transform.orientation = glm::rotate(component->transform.orientation, deltaEuler.x, glm::vec3(1, 0, 0));
+							component->transform.orientation = glm::rotate(component->transform.orientation, deltaEuler.y, glm::vec3(0, 1, 0));
+							component->transform.orientation = glm::rotate(component->transform.orientation, deltaEuler.z, glm::vec3(0, 0, 1));
+						}
+						ImGui::DragFloat3("Scale", glm::value_ptr(component->transform.scale), 0.1f);
 					}
 				}
+				else if (ImGui::Button("Add Game Object")) {
+					mRegistry.emplace<GameObjectComponent>(selected);
+				}
 
-				v.Render(k.c_str());
+				if (MeshFilterComponent* component = mRegistry.try_get<MeshFilterComponent>(selected)) {
+					if (ImGui::CollapsingHeader("Mesh Filter")) {
+						if (ImGui::Button("Select.."))
+							ImGui::OpenPopup("meshFilterSelect");
+
+						if (ImGui::BeginPopup("meshFilterSelect")) {
+							static std::string path;
+							ImGui::InputText("Resource", &path);
+							if (ImGui::Button("Apply")) {
+								component->mesh = mResourceManager.getMesh(path);
+								if (component->mesh) ImGui::CloseCurrentPopup();
+							}
+
+							ImGui::EndPopup();
+						}
+					}
+				}
+				else if (ImGui::Button("Add Mesh Filter")) {
+					mRegistry.emplace<MeshFilterComponent>(selected);
+				}
+
+				if (MeshRendererComponent* component = mRegistry.try_get<MeshRendererComponent>(selected)) {
+					if (ImGui::CollapsingHeader("Mesh Renderer")) {
+						if (ImGui::Button("Select shader.."))
+							ImGui::OpenPopup("meshRendererShaderSelect");
+
+						if (ImGui::BeginPopup("meshRendererShaderSelect")) {
+							static std::string path;
+							ImGui::InputText("Resource", &path);
+							if (ImGui::Button("Apply")) {
+								component->shader = mResourceManager.getShaderProgram(path);
+								if (component->shader) ImGui::CloseCurrentPopup();
+							}
+
+							ImGui::EndPopup();
+						}
+
+						if (ImGui::Button("Select texture.."))
+							ImGui::OpenPopup("meshRendererTextureSelect");
+
+						if (ImGui::BeginPopup("meshRendererTextureSelect")) {
+							static std::string path;
+							ImGui::InputText("Resource", &path);
+							if (ImGui::Button("Apply")) {
+								component->texture = mResourceManager.getTexture(path);
+								if (component->texture) ImGui::CloseCurrentPopup();
+							}
+
+							ImGui::EndPopup();
+						}
+					}
+				}
+				else if (ImGui::Button("Add Mesh Renderer")) {
+					mRegistry.emplace<MeshRendererComponent>(selected);
+				}
+
+				if (CameraComponent* component = mRegistry.try_get<CameraComponent>(selected)) {
+					if (ImGui::CollapsingHeader("Camera")) {
+						ImGui::DragFloat("Fov", &component->fov, 1.0f, 10.0f, 170.0f);
+						ImGui::DragFloatRange2("Clipping planes", &component->clippingPlanes.x, &component->clippingPlanes.y, 0.1f, 0.001f, 1000.0f);
+					}
+				}
+				else if (ImGui::Button("Add Camera")) {
+					mRegistry.emplace<CameraComponent>(selected);
+				}
 			}
-			ImGui::End();
 		}
+		ImGui::End();
+		
+	}
 
-		static entt::entity selected = entt::null;
+	void drawGuiHierarchy() {
+		if (!mViewHierarchy) return;
 
-		if (ImGui::Begin("Hierarchy")) {
+		if (ImGui::Begin("Hierarchy", &mViewHierarchy)) {
+			if (ImGui::Button("Create empty")) {
+				entt::entity entity = mRegistry.create();
+				mRegistry.emplace<GameObjectComponent>(entity);
+			}
+
 			for (auto&& [entity, gameObject] : mRegistry.view<GameObjectComponent>().each()) {
 				ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_Leaf;
 				if (selected == entity)
 					flags |= ImGuiTreeNodeFlags_Selected;
-		
+
 				bool opened = ImGui::TreeNodeEx((void*)(uintptr_t)entity, flags, "%s", gameObject.name.c_str());
 				if (ImGui::IsItemActive())
 					selected = entity;
@@ -496,18 +639,98 @@ struct Engine final {
 			}
 		}
 		ImGui::End();
+	}
 
-		if (ImGui::Begin("Properties")) {
-			if (selected != entt::null) {
-				GameObjectComponent* gameObject = mRegistry.try_get<GameObjectComponent>(selected);
-				if (gameObject) {
-					ImGui::InputText("Name", &gameObject->name);
-					if (ImGui::CollapsingHeader("Transform"))
-						transformEditUi(gameObject->transform);
+	void drawUi() {
+		ImGui::DockSpaceOverViewport();
+
+		if (ImGui::BeginMainMenuBar()) {
+			if (ImGui::BeginMenu("File")) {
+				if (ImGui::MenuItem("Quit", "Alt+F4", nullptr))
+					mRunning = false;
+
+				ImGui::EndMenu();
+			}
+
+			if (ImGui::BeginMenu("View")) {
+				ImGui::MenuItem("Hierarchy", nullptr, &mViewHierarchy);
+				ImGui::MenuItem("Properties", nullptr, &mViewProperties);
+				ImGui::MenuItem("Viewport", nullptr, &mViewViewport);
+				ImGui::Separator();
+				ImGui::MenuItem("Dear ImGui Demo", nullptr, &mViewImGuiDemoWindow);
+
+				ImGui::EndMenu();
+			}
+
+			ImGui::EndMainMenuBar();
+		}
+
+		if (ImGui::Begin("Debug", nullptr, ImGuiWindowFlags_MenuBar)) {
+			ImGui::Checkbox("Wireframe", &mWireframe);
+			ImGui::ColorEdit3("Sky color", glm::value_ptr(mSkyColor));
+		}
+		ImGui::End();
+
+		for (auto& [k, v] : mResourceManager.mShaderEditor) {
+			if (v.enabled) {
+				if (ImGui::Begin(k.c_str(), &v.enabled, ImGuiWindowFlags_None)) {
+					if (ImGui::Button("Save and reload")) {
+						std::ofstream file(k.c_str(), std::ofstream::out | std::ofstream::binary);
+						file.write(v.editor.GetText().data(), glm::max<size_t>(v.editor.GetText().size() - 1, 0)); // getText returns an extra endline at the end
+						file.close();
+						// File is closed and written
+
+						// If shader is in memory, reload it
+						auto it = mResourceManager.mShaders.find(k);
+						if (it != mResourceManager.mShaders.end()) {
+							if (std::shared_ptr<hyperengine::ShaderProgram> program = it->second.lock())
+								mResourceManager.reloadShader(k, *program);
+						}
+					}
+
+					v.editor.Render(k.c_str());
+				}
+				ImGui::End();
+			}
+		}
+
+		if (ImGui::Begin("Resource Manager")) {
+			if (ImGui::CollapsingHeader("Meshes")) {
+				for (auto& [k, v] : mResourceManager.mMeshes) {
+					if (ImGui::TreeNodeEx(k.c_str())) {
+						ImGui::LabelText("Strong refs", "%d", v.use_count());
+						ImGui::TreePop();
+					}
+				}
+			}
+			if (ImGui::CollapsingHeader("Textures")) {
+				for (auto& [k, v] : mResourceManager.mTextures) {
+					if (ImGui::TreeNodeEx(k.c_str())) {
+						ImGui::LabelText("Strong refs", "%d", v.use_count());
+						if (auto strongRef = v.lock())
+							ImGui::Image((void*)(uintptr_t)strongRef->handle(), { 128, 128 }, { 0, 1 }, { 1, 0 });;
+						ImGui::TreePop();
+					}
+				}
+			}
+			if (ImGui::CollapsingHeader("Shaders")) {
+				for (auto& [k, v] : mResourceManager.mShaders) {
+					if (ImGui::TreeNodeEx(k.c_str())) {
+						ImGui::LabelText("Strong refs", "%d", v.use_count());
+						ImGui::Checkbox("Editor enabled", &mResourceManager.mShaderEditor[k].enabled);
+
+						ImGui::TreePop();
+					}
 				}
 			}
 		}
 		ImGui::End();
+
+		drawGuiHierarchy();
+
+		
+
+		drawGuiProperties();
 
 		if (mViewImGuiDemoWindow)
 			ImGui::ShowDemoWindow(&mViewImGuiDemoWindow);
@@ -516,40 +739,128 @@ struct Engine final {
 	void update() {
 		drawUi();
 
-		glm::mat4 projection = glm::perspective(glm::radians(mFov), static_cast<float>(mFramebufferSize.x) / static_cast<float>(mFramebufferSize.y), mNear, mFar);
+		if (mViewViewport) {
+			if (ImGui::Begin("Viewport", &mViewViewport)) {
+				static_assert(sizeof(ImVec2) == sizeof(glm::vec2));
+
+				glm::ivec2 contentAvail = std::bit_cast<glm::vec2>(ImGui::GetContentRegionAvail());
+
+				if (contentAvail.x > 0 && contentAvail.y > 0) {
+
+					// Different sizes, gotta resize the viewport buffer
+					if (contentAvail != mViewportSize) {
+						mViewportSize = contentAvail;
+
+						mFramebufferColor = { {
+							.width = mViewportSize.x,
+							.height = mViewportSize.y,
+							.format = hyperengine::PixelFormat::kRgba8,
+							.minFilter = GL_LINEAR,
+							.magFilter = GL_LINEAR,
+							.wrap = GL_CLAMP_TO_EDGE,
+							.label = "framebuffer color"
+						} };
+
+						if (mFramebufferDepth)
+							glDeleteRenderbuffers(1, &mFramebufferDepth);
+						if (mFramebuffer)
+							glDeleteFramebuffers(1, &mFramebuffer);
+
+						glGenRenderbuffers(1, &mFramebufferDepth);
+						glBindRenderbuffer(GL_RENDERBUFFER, mFramebufferDepth);
+						glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH_COMPONENT24, mViewportSize.x, mViewportSize.y);
+
+						glGenFramebuffers(1, &mFramebuffer);
+						glBindFramebuffer(GL_FRAMEBUFFER, mFramebuffer);
+						glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, mFramebufferColor.handle(), 0);
+						glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, mFramebufferDepth);
+					}
+
+					glBindFramebuffer(GL_FRAMEBUFFER, mFramebuffer);
+
+					// RENDER THE SCENE
+					bool cameraFound = false;
+					{
+						glm::mat4 cameraTransform;
+						glm::mat4 cameraProjection;
+						float farPlane;
+
+						// Find camera, set vals
+						for (auto&& [entity, gameObject, camera] : mRegistry.view<GameObjectComponent, CameraComponent>().each()) {
+							cameraTransform = gameObject.transform.get();
+							cameraProjection = glm::perspective(glm::radians(camera.fov), static_cast<float>(mViewportSize.x) / static_cast<float>(mViewportSize.y), camera.clippingPlanes.x, camera.clippingPlanes.y);
+							farPlane = camera.clippingPlanes.y;
+							cameraFound = true;
+							break;
+						}
+
+						if (cameraFound) {
+							glViewport(0, 0, mViewportSize.x, mViewportSize.y);
+							glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+							glClearColor(mSkyColor.r, mSkyColor.g, mSkyColor.b, 1.0f);
+
+							if (mWireframe) glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
+
+							for (auto&& [entity, gameObject, meshFilter, meshRenderer] : mRegistry.view<GameObjectComponent, MeshFilterComponent, MeshRendererComponent>().each()) {
+								if (!meshRenderer.texture) continue;
+								if (!meshRenderer.shader) continue;
+								if (!meshFilter.mesh) continue;
+
+								//if (gameObject.spin) {
+								//	gameObject.transform.orientation = glm::rotate(gameObject.transform.orientation, glm::radians(1.0f), glm::vec3(0, 1, 0));
+								//}
+
+								if (!meshRenderer.shader->cull()) glDisable(GL_CULL_FACE);
+								meshRenderer.texture->bind(0);
+								meshRenderer.shader->bind();
+								meshRenderer.shader->uniformMat4f("uProjection", cameraProjection);
+								meshRenderer.shader->uniformMat4f("uTransform", gameObject.transform.get());
+								meshRenderer.shader->uniformMat4f("uView", glm::inverse(cameraTransform));
+								meshRenderer.shader->uniform1f("uFarPlane", farPlane);
+								meshRenderer.shader->uniform3f("uSkyColor", mSkyColor);
+								meshFilter.mesh->draw();
+								if (!meshRenderer.shader->cull()) glEnable(GL_CULL_FACE);
+							}
+
+							if (mWireframe) glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
+						}
+					}
+
+					glBindFramebuffer(GL_FRAMEBUFFER, 0);
+
+					if (cameraFound)
+						ImGui::Image((void*)(uintptr_t)mFramebufferColor.handle(), ImGui::GetContentRegionAvail(), { 0, 1 }, { 1, 0 });
+					else
+						ImGui::TextUnformatted("No camera found");
+				}
+			}
+			ImGui::End();
+		}
 
 		glViewport(0, 0, mFramebufferSize.x, mFramebufferSize.y);
 		glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
-		
-		for(auto&& [entity, gameObject] : mRegistry.view<GameObjectComponent>().each()) {
-			if (!gameObject.texture) continue;
-			if (!gameObject.shader) continue;
-			if (!gameObject.mesh) continue;
-
-			if (gameObject.spin) {
-				gameObject.transform.orientation = glm::rotate(gameObject.transform.orientation, glm::radians(1.0f), glm::vec3(0, 1, 0));
-			}
-
-			gameObject.texture->bind(0);
-			gameObject.shader->bind();
-			gameObject.shader->uniformMat4f("uProjection", projection);
-			gameObject.shader->uniformMat4f("uTransform", gameObject.transform.get());
-			gameObject.shader->uniformMat4f("uView", glm::inverse(mCameraTransform.get()));
-			gameObject.mesh->draw();
-		}
 	}
 
 	hyperengine::Window mWindow;
-	Transform mCameraTransform;
 
+	AudioEngine mAudioEngine;
 	entt::registry mRegistry;
 	ResourceManager mResourceManager;
+	entt::entity selected = entt::null;
+
+	GLuint mFramebuffer = 0;
+	GLuint mFramebufferDepth = 0;
+	hyperengine::Texture mFramebufferColor;
+	glm::ivec2 mViewportSize{};
+
+	glm::vec3 mSkyColor = { 0.7f, 0.8f, 0.9f };
+	bool mWireframe = false;
 
 	bool mRunning = true;
+	bool mViewHierarchy = true;
+	bool mViewProperties = true;
+	bool mViewViewport = true;
 	bool mViewImGuiDemoWindow = false;
-	float mFov = 80.0f;
-	float mNear = 0.1f;
-	float mFar = 100.0f;
 	glm::ivec2 mFramebufferSize;
 };
 

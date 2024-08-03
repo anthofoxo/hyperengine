@@ -1,5 +1,6 @@
 #include "he_shader.hpp"
 
+#include <regex>
 #include <iostream>
 #include <debug_trap.h>
 #include <glm/gtc/type_ptr.hpp>
@@ -46,9 +47,24 @@ namespace {
 
 namespace hyperengine {
 	ShaderProgram::ShaderProgram(CreateInfo const& info) {
+		std::string source = std::string(info.source);
+
+		// Match engine pragmas
+		{
+			std::regex regex("@(\\w+)\\s+(\\w+)\\s*=\\s*(\\w+)");
+
+			for (std::sregex_iterator i = std::sregex_iterator(source.begin(), source.end(), regex); i != std::sregex_iterator(); ++i) {
+				std::smatch match = *i;
+
+				if (match[1] == "property" && match[2] == "cull")
+					mCull = std::stoi(match[3]);
+			}
+			source = std::regex_replace(source, regex, "//$&");
+		}
+
 		// Theres probably a better way to do this, look into it sometime plz
-		std::string vertSource = std::string(gVertHeader) + std::string(info.source);
-		std::string fragSource = std::string(gFragHeader) + std::string(info.source);
+		std::string vertSource = std::string(gVertHeader) + source;
+		std::string fragSource = std::string(gFragHeader) + source;
 		//
 
 		GLuint vert = makeShader(GL_VERTEX_SHADER, vertSource.data(), static_cast<int>(vertSource.size()), mErrors);
@@ -103,6 +119,7 @@ namespace hyperengine {
 		std::swap(mHandle, other.mHandle);
 		std::swap(mUniforms, other.mUniforms);
 		std::swap(mErrors, other.mErrors);
+		std::swap(mCull, other.mCull);
 		return *this;
 	}
 
@@ -116,6 +133,16 @@ namespace hyperengine {
 		auto it = mUniforms.find(name);
 		if (it == mUniforms.end()) return -1;
 		return it->second;
+	}
+
+	void ShaderProgram::uniform3f(std::string_view name, glm::vec3 const& v0) {
+		bind();
+		glUniform3fv(getUniformLocation(name), 1, glm::value_ptr(v0));
+	}
+
+	void ShaderProgram::uniform1f(std::string_view name, float v0) {
+		bind();
+		glUniform1f(getUniformLocation(name), v0);
 	}
 
 	void ShaderProgram::uniformMat4f(std::string_view name, glm::mat4 const& v0) {

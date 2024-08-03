@@ -24,9 +24,10 @@ includedirs {
     "%{wks.location}/vendor/assimp_config",
 	"%{wks.location}/vendor/assimp/include",
     "%{wks.location}/vendor/entt/src",
+    "%{wks.location}/vendor/lua/src",
 }
 
-links { "glfw", "glad", "imgui", "assimp" }
+links { "glfw", "glad", "imgui", "assimp", "lua" }
 
 filter "system:windows"
 files "%{prj.location}/*.rc"

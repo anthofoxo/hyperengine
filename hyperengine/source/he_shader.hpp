@@ -23,10 +23,13 @@ namespace hyperengine {
 		ShaderProgram& operator=(ShaderProgram&& other) noexcept;
 		~ShaderProgram() noexcept;
 
+		inline bool cull() const { return mCull; }
 		inline GLuint handle() const { return mHandle; }
 		inline std::vector<std::string> const& errors() const { return mErrors; }
 
 		GLint getUniformLocation(std::string_view name) const;
+		void uniform1f(std::string_view name, float v0);
+		void uniform3f(std::string_view name, glm::vec3 const& v0);
 		void uniformMat4f(std::string_view name, glm::mat4 const& v0);
 
 		void bind();
@@ -42,5 +45,6 @@ namespace hyperengine {
 		GLuint mHandle = 0;
 		std::unordered_map<std::string, int, Hash, std::equal_to<>> mUniforms;
 		std::vector<std::string> mErrors;
+		bool mCull = true;
 	};
 }

@@ -34,6 +34,8 @@ namespace hyperengine {
 		Texture& operator=(Texture&& other) noexcept;
 		~Texture() noexcept;
 
+		inline GLuint handle() const { return mHandle; }
+
 		void upload(UploadInfo const& info);
 		void bind(GLuint unit);
 	private:
