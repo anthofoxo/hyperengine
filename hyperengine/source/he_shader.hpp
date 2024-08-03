@@ -30,6 +30,7 @@ namespace hyperengine {
 		inline std::vector<std::string> const& errors() const { return mErrors; }
 
 		GLint getUniformLocation(std::string_view name) const;
+		void uniform1i(std::string_view name, int v0);
 		void uniform1f(std::string_view name, float v0);
 		void uniform3f(std::string_view name, glm::vec3 const& v0);
 		void uniformMat4f(std::string_view name, glm::mat4 const& v0);

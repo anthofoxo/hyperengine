@@ -1,4 +1,4 @@
-return {
+local objects = {
   {
     translation = { 0, 0, 0 },
     scale = { 1, 1, 1 },
@@ -13,6 +13,7 @@ return {
     name    = "dragon",
     mesh    = "dragon.obj",
     texture = "color.png",
+    specular = "internal://white.png",
     shader  = "opaque.glsl"
   },
   {
@@ -21,6 +22,7 @@ return {
     name    = "barrel",
     mesh    = "barrel.obj",
     texture = "barrel.png",
+    specular = "barrel_s.png",
     shader  = "opaque.glsl"
   },
   {
@@ -40,14 +42,6 @@ return {
     shader  = "opaque.glsl"
   },
   {
-    translation = { -20, 0, -20 },
-    scale = { 1, 1, 1 },
-    name    = "pine",
-    mesh    = "pine.obj",
-    texture = "pine.png",
-    shader  = "cutout.glsl"
-  },
-  {
     translation = { 3, 0, -3 },
     scale = { 1, 1, 1 },
     name    = "fox",
@@ -64,3 +58,20 @@ return {
     shader  = "cutout.glsl"
   },
 }
+
+for x=-3,3 do
+  for z=-3,3 do
+    if not(x == 0 and z == 0) then
+      table.insert(objects, {
+        translation = { x * 20, 0, -z * 20 },
+        scale = { 0.75, 0.75, 0.75 },
+        name    = "pine " .. x .. "_" .. z,
+        mesh    = "pine.obj",
+        texture = "pine.png",
+        shader  = "cutout.glsl"
+      })
+    end
+  end
+end
+
+return objects

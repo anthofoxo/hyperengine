@@ -7,8 +7,9 @@ namespace hyperengine {
 	class Window final {
 	public:
 		struct CreateInfo final {
-			int width, height;
-			char const* title;
+			int width = 0, height = 0;
+			char const* title = nullptr;
+			bool maximized = false;
 		};
 
 		constexpr Window() noexcept = default;

@@ -1,35 +1,6 @@
 #include "he_texture.hpp"
 
 namespace hyperengine {
-	namespace {
-		GLint pixelFormatToInternalFormat(PixelFormat format) {
-			using enum PixelFormat;
-
-			switch (format) {
-			case kRgba8: return GL_RGBA8;
-			default: std::unreachable();
-			}
-		}
-
-		GLenum pixelFormatToFormat(PixelFormat format) {
-			using enum PixelFormat;
-
-			switch (format) {
-			case kRgba8: return GL_RGBA;
-			default: std::unreachable();
-			}
-		}
-
-		GLenum pixelFormatToType(PixelFormat format) {
-			using enum PixelFormat;
-
-			switch (format) {
-			case kRgba8: return GL_UNSIGNED_BYTE;
-			default: std::unreachable();
-			}
-		}
-	}
-
 	Texture::Texture(CreateInfo const& info) {
 		if (GLAD_GL_ARB_direct_state_access) {
 			glCreateTextures(GL_TEXTURE_2D, 1, &mHandle);

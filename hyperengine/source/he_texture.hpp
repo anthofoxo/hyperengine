@@ -5,11 +5,9 @@
 #include <string>
 #include <string_view>
 
-namespace hyperengine {
-	enum struct PixelFormat {
-		kRgba8
-	};
+#include "he_pixelformat.hpp"
 
+namespace hyperengine {
 	class Texture final {
 	public:
 		struct CreateInfo final {

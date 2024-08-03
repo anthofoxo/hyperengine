@@ -9,7 +9,8 @@ OUTPUT(vec4, oColor, 0);
 UNIFORM(mat4, uTransform);
 UNIFORM(mat4, uView);
 UNIFORM(mat4, uProjection);
-UNIFORM(sampler2D, uSampler);
+UNIFORM(sampler2D, uAlbedo);
+UNIFORM(sampler2D, uSpecular);
 UNIFORM(float, uFarPlane);
 UNIFORM(vec3, uSkyColor);
 CONST(vec3, kLightDirection, normalize(vec3(0, 0, -1)));
@@ -29,12 +30,13 @@ void main(void) {
 
 #ifdef FRAG
 void main(void) {
-    oColor = texture(uSampler, vTexCoord);
+    oColor = texture(uAlbedo, vTexCoord);
+    float specularStrength = texture(uSpecular, vTexCoord).r;
     vec3 unitNormal = normalize(vNormal);
     vec3 unitToCamera = normalize(vToCamera);
     oColor.rgb *= max(kLightColor * dot(unitNormal, -kLightDirection), 0.2);
     vec3 reflectedLight = reflect(kLightDirection, unitNormal);
-    oColor.rgb += kLightColor * pow(max(dot(reflectedLight, unitToCamera), 0.0), 10.0);
+    oColor.rgb += kLightColor * pow(max(dot(reflectedLight, unitToCamera), 0.0), 10.0) * specularStrength;
     oColor.rgb = mix(oColor.rgb, uSkyColor, smoothstep(uFarPlane * 0.6, uFarPlane, vDistance));
 }
 #endif

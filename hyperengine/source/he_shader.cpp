@@ -143,6 +143,11 @@ namespace hyperengine {
 		glUniform3fv(getUniformLocation(name), 1, glm::value_ptr(v0));
 	}
 
+	void ShaderProgram::uniform1i(std::string_view name, int v0) {
+		bind();
+		glUniform1i(getUniformLocation(name), v0);
+	}
+
 	void ShaderProgram::uniform1f(std::string_view name, float v0) {
 		bind();
 		glUniform1f(getUniformLocation(name), v0);

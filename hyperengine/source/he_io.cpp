@@ -44,6 +44,11 @@ namespace hyperengine {
 		return content;
 	}
 
+	void writeFile(char const* path, void const* data, size_t size) {
+		std::ofstream file(path, std::ofstream::out | std::ofstream::binary);
+		file.write(static_cast<char const*>(data), size);
+	}
+
 	std::optional<hyperengine::Mesh> readMesh(char const* path) {
 		struct Vertex final {
 			glm::vec3 position;
