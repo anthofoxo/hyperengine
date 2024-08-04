@@ -5,9 +5,8 @@ layout(std140) uniform EngineData {
     float gFarPlane;
 };
 
-@edithint uColor = color
 uniform Material {
-    vec3 uColor;
+    float uTiling;
 };
 
 INPUT(vec3, iPosition, 0);
@@ -30,7 +29,7 @@ void main(void) {
     vec4 worldSpace = uTransform * vec4(iPosition, 1.0);
     vec4 viewSpace = gView * worldSpace;
     gl_Position = gProjection * viewSpace;
-    vTexCoord = iTexCoord;
+    vTexCoord = iTexCoord * uTiling;
     vNormal = transpose(inverse(mat3(uTransform))) * iNormal;
     vToCamera = (inverse(gView) * vec4(0.0, 0.0, 0.0, 1.0)).xyz - worldSpace.xyz;
     vDistance = length(viewSpace.xyz);
@@ -40,7 +39,6 @@ void main(void) {
 #ifdef FRAG
 void main(void) {
     oColor = texture(tAlbedo, vTexCoord);
-    oColor.rgb *= uColor;
     float specularStrength = texture(tSpecular, vTexCoord).r;
     vec3 unitNormal = normalize(vNormal);
     vec3 unitToCamera = normalize(vToCamera);

@@ -11,8 +11,6 @@ namespace {
 #define INPUT(type, name, index) layout(location = index) in type name
 #define OUTPUT(type, name, index)
 #define VARYING(type, name) out type name
-#define UNIFORM(type, name) uniform type name
-#define CONST(type, name, value) const type name = value
 #line 1
 )";
 
@@ -21,8 +19,6 @@ namespace {
 #define INPUT(type, name, index)
 #define OUTPUT(type, name, index) layout(location = index) out type name
 #define VARYING(type, name) in type name
-#define UNIFORM(type, name) uniform type name
-#define CONST(type, name, value) const type name = value
 #line 1
 )";
 
@@ -58,8 +54,11 @@ namespace hyperengine {
 
 				if (match[1] == "property" && match[2] == "cull")
 					mCull = std::stoi(match[3]);
+
+				if (match[1] == "edithint")
+					mEditHints[match[2]] = match[3];
 			}
-			source = std::regex_replace(source, regex, "//$&");
+			source = std::regex_replace(source, regex, "// ENGINE PRAGMA APPLIED // $&");
 		}
 
 		// Theres probably a better way to do this, look into it sometime plz
@@ -94,26 +93,108 @@ namespace hyperengine {
 				std::cerr << error << '\n';
 		}
 
+		GLint state;
+		glGetIntegerv(GL_CURRENT_PROGRAM, &state);
+		glUseProgram(mHandle);
+
 		// Read all uniforms ahead of time, no need to constantly look these up every frame
 		GLint uniformCount;
 		glGetProgramiv(mHandle, GL_ACTIVE_UNIFORMS, &uniformCount);
 
 		if (uniformCount != 0) {
+			int opaqueAssignment = 0;
+
 			GLint maxNameLength;
 			glGetProgramiv(mHandle, GL_ACTIVE_UNIFORM_MAX_LENGTH, &maxNameLength);
 			std::unique_ptr<char[]> uniformName = std::make_unique<char[]>(maxNameLength);
 
-			for (GLint i = 0; i < uniformCount; ++i) {
+			for (GLuint i = 0; i < uniformCount; ++i) {
 				GLsizei length;
 				GLsizei count;
 				GLenum type;
+				
 				glGetActiveUniform(mHandle, i, maxNameLength, &length, &count, &type, uniformName.get());
 
 				GLint location = glGetUniformLocation(mHandle, uniformName.get());
-				mUniforms.insert(std::make_pair(std::string(uniformName.get(), length), location));
+
+				// This uniform is not used or is part of a uniform block
+				if (location != -1) {
+					GLint blockIndex;
+					glGetActiveUniformsiv(mHandle, 1, &i, GL_UNIFORM_BLOCK_INDEX, &blockIndex);
+
+					GLint offset;
+					glGetActiveUniformsiv(mHandle, 1, &i, GL_UNIFORM_OFFSET, &offset);
+
+					mUniforms.insert(std::make_pair(std::string(uniformName.get(), length), Uniform(location, UniformType(type), offset, blockIndex)));
+
+					// Automatically assign opaques
+					if (type == GL_SAMPLER_2D) {
+						glUniform1i(location, opaqueAssignment);
+						mOpaqueAssignments[std::string(uniformName.get(), length)] = opaqueAssignment;
+						++opaqueAssignment;
+					}
+				}
+
+				
 			}
 		}
 
+		GLint blockCount;
+		glGetProgramiv(mHandle, GL_ACTIVE_UNIFORM_BLOCKS, &blockCount);
+
+		if (blockCount != 0) {
+			GLint maxNameLength;
+			glGetProgramiv(mHandle, GL_ACTIVE_UNIFORM_BLOCK_MAX_NAME_LENGTH, &maxNameLength);
+			std::unique_ptr<char[]> blockName = std::make_unique<char[]>(maxNameLength);
+
+
+			for (GLuint i = 0; i < blockCount; ++i) {
+				GLsizei length;
+				
+				glGetActiveUniformBlockName(mHandle, i, maxNameLength, &length, blockName.get());
+
+				if (std::string_view(blockName.get()) == "EngineData") {
+					glUniformBlockBinding(mHandle, i, 0);
+				}
+
+				if (std::string_view(blockName.get()) == "Material") {
+					glUniformBlockBinding(mHandle, i, 1);
+
+					GLint memorySize;
+					glGetActiveUniformBlockiv(mHandle, i, GL_UNIFORM_BLOCK_DATA_SIZE, &memorySize);
+					mMaterialAllocationSize = memorySize;
+
+					GLint activeUniformCount;
+					glGetActiveUniformBlockiv(mHandle, i, GL_UNIFORM_BLOCK_ACTIVE_UNIFORMS, &activeUniformCount);
+
+					std::vector<GLuint> activeUniforms;
+					activeUniforms.resize(activeUniformCount);
+					glGetActiveUniformBlockiv(mHandle, i, GL_UNIFORM_BLOCK_ACTIVE_UNIFORM_INDICES, (GLint*)activeUniforms.data());
+
+					GLint uniformMaxNameLength;
+					glGetProgramiv(mHandle, GL_ACTIVE_UNIFORM_MAX_LENGTH, &uniformMaxNameLength);
+					std::unique_ptr<char[]> uniformName = std::make_unique<char[]>(uniformMaxNameLength);
+
+					for (GLuint iUniform = 0; iUniform < activeUniformCount; ++iUniform) {
+						GLsizei length;
+						GLsizei count;
+						GLenum type;
+						glGetActiveUniform(mHandle, activeUniforms[iUniform], uniformMaxNameLength, &length, &count, &type, uniformName.get());
+
+						GLint offset;
+						glGetActiveUniformsiv(mHandle, 1, &activeUniforms[iUniform], GL_UNIFORM_OFFSET, &offset);
+
+
+						mMaterialInfo[std::string(uniformName.get(), length)] = { .location = 0, .type = UniformType(type), .offset = offset, .blockIndex = -1 };
+					}
+				}
+
+				
+				
+			}
+		}
+
+		glUseProgram(static_cast<GLuint>(state));
 		mOrigin = std::string(info.origin);
 	}
 
@@ -123,6 +204,10 @@ namespace hyperengine {
 		std::swap(mUniforms, other.mUniforms);
 		std::swap(mErrors, other.mErrors);
 		std::swap(mCull, other.mCull);
+		std::swap(mOpaqueAssignments, other.mOpaqueAssignments);
+		std::swap(mMaterialInfo, other.mMaterialInfo);
+		std::swap(mMaterialAllocationSize, other.mMaterialAllocationSize);
+		std::swap(mEditHints, other.mEditHints);
 		return *this;
 	}
 
@@ -132,10 +217,16 @@ namespace hyperengine {
 		}
 	}
 
+	ShaderProgram::Uniform ShaderProgram::getUniform(std::string_view name) const {
+		auto it = mUniforms.find(name);
+		if (it == mUniforms.end()) return Uniform();
+		return it->second;
+	}
+
 	GLint ShaderProgram::getUniformLocation(std::string_view name) const {
 		auto it = mUniforms.find(name);
 		if (it == mUniforms.end()) return -1;
-		return it->second;
+		return it->second.location;
 	}
 
 	void ShaderProgram::uniform3f(std::string_view name, glm::vec3 const& v0) {

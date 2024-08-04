@@ -138,7 +138,7 @@ namespace hyperengine {
 				.format = hyperengine::PixelFormat::kRgba8,
 				.minFilter = GL_LINEAR,
 				.magFilter = GL_LINEAR,
-				.wrap = GL_CLAMP_TO_EDGE,
+				.wrap = GL_REPEAT,
 				.label = filepath,
 				.origin = filepath
 			}};
