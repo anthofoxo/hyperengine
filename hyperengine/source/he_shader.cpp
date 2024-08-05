@@ -98,8 +98,8 @@ namespace hyperengine {
 		glUseProgram(mHandle);
 
 		// Read all uniforms ahead of time, no need to constantly look these up every frame
-		GLint uniformCount;
-		glGetProgramiv(mHandle, GL_ACTIVE_UNIFORMS, &uniformCount);
+		GLuint uniformCount;
+		glGetProgramiv(mHandle, GL_ACTIVE_UNIFORMS, reinterpret_cast<GLint*>(&uniformCount));
 
 		if (uniformCount != 0) {
 			int opaqueAssignment = 0;
@@ -139,8 +139,8 @@ namespace hyperengine {
 			}
 		}
 
-		GLint blockCount;
-		glGetProgramiv(mHandle, GL_ACTIVE_UNIFORM_BLOCKS, &blockCount);
+		GLuint blockCount;
+		glGetProgramiv(mHandle, GL_ACTIVE_UNIFORM_BLOCKS, reinterpret_cast<GLint*>(&blockCount));
 
 		if (blockCount != 0) {
 			GLint maxNameLength;
@@ -164,8 +164,8 @@ namespace hyperengine {
 					glGetActiveUniformBlockiv(mHandle, i, GL_UNIFORM_BLOCK_DATA_SIZE, &memorySize);
 					mMaterialAllocationSize = memorySize;
 
-					GLint activeUniformCount;
-					glGetActiveUniformBlockiv(mHandle, i, GL_UNIFORM_BLOCK_ACTIVE_UNIFORMS, &activeUniformCount);
+					GLuint activeUniformCount;
+					glGetActiveUniformBlockiv(mHandle, i, GL_UNIFORM_BLOCK_ACTIVE_UNIFORMS, reinterpret_cast<GLint*>(&activeUniformCount));
 
 					std::vector<GLuint> activeUniforms;
 					activeUniforms.resize(activeUniformCount);

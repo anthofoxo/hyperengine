@@ -39,7 +39,7 @@ See shader sources in `./working` for examples.
 * [miniaudio v0.11.21](https://github.com/mackron/miniaudio/tree/4a5b74bef029b3592c54b6048650ee5f972c1a48)
 ### From submodules
 * [GLFW 3.4](https://github.com/glfw/glfw/tree/3.4)
-* [Glad 3.3+](https://gen.glad.sh/#generator=c&api=gl%3D3.3&profile=gl%3Dcore%2Cgles1%3Dcommon&extensions=GL_ARB_direct_state_access%2CGL_ARB_texture_storage%2CGL_KHR_debug)
+* [Glad 3.3+](https://gen.glad.sh/#generator=c&api=gl%3D3.3&profile=gl%3Dcore%2Cgles1%3Dcommon&extensions=GL_ARB_direct_state_access%2CGL_ARB_texture_filter_anisotropic%2CGL_ARB_texture_storage%2CGL_EXT_texture_filter_anisotropic%2CGL_KHR_debug)
 * [glm 1.0.1](https://github.com/g-truc/glm/tree/1.0.1)
 * [ImGui v1.90.9-docking](https://github.com/ocornut/imgui/tree/v1.90.9-docking)
 * [assimp v5.0.1](https://github.com/assimp/assimp/tree/v5.0.1)

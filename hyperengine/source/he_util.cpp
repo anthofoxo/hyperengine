@@ -48,7 +48,7 @@ namespace hyperengine {
 		for (uint_fast8_t i = 0; i < 3; ++i) {
 			lua_pushinteger(L, i + 1);
 			lua_gettable(L, -2);
-			result[i] = lua_tonumber(L, -1);
+			result[i] = static_cast<float>(lua_tonumber(L, -1));
 			lua_pop(L, 1);
 		}
 

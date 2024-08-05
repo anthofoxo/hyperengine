@@ -136,7 +136,7 @@ namespace hyperengine {
 				.width = x,
 				.height = y,
 				.format = hyperengine::PixelFormat::kRgba8,
-				.minFilter = GL_LINEAR,
+				.minFilter = GL_LINEAR_MIPMAP_LINEAR,
 				.magFilter = GL_LINEAR,
 				.wrap = GL_REPEAT,
 				.label = filepath,
@@ -149,7 +149,8 @@ namespace hyperengine {
 				.width = x,
 				.height = y,
 				.format = hyperengine::PixelFormat::kRgba8,
-				.pixels = pixels
+				.pixels = pixels,
+				.mips = true
 			});
 
 		stbi_image_free(pixels);

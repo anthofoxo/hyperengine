@@ -23,7 +23,8 @@ namespace hyperengine {
 			GLint xoffset, yoffset;
 			GLsizei width, height;
 			PixelFormat format;
-			void const* pixels;
+			void const* pixels = nullptr;
+			bool mips = false;
 		};
 
 		constexpr Texture() noexcept = default;
