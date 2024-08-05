@@ -602,6 +602,10 @@ struct Engine final {
 								if (type == hyperengine::ShaderProgram::UniformType::kVec3f && lua_istable(L, -1)) {
 									*((glm::vec3*)(meshRenderer.data.data() + offset)) = hyperengine::luaToVec3(L);
 								}
+
+								if (type == hyperengine::ShaderProgram::UniformType::kVec4f && lua_istable(L, -1)) {
+									*((glm::vec4*)(meshRenderer.data.data() + offset)) = hyperengine::luaToVec4(L);
+								}
 							}
 
 							lua_pop(L, 1);

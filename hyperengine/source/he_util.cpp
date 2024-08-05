@@ -54,4 +54,17 @@ namespace hyperengine {
 
 		return result;
 	}
+
+	glm::vec4 luaToVec4(lua_State* L) {
+		glm::vec4 result;
+
+		for (uint_fast8_t i = 0; i < 4; ++i) {
+			lua_pushinteger(L, i + 1);
+			lua_gettable(L, -2);
+			result[i] = static_cast<float>(lua_tonumber(L, -1));
+			lua_pop(L, 1);
+		}
+
+		return result;
+	}
 }

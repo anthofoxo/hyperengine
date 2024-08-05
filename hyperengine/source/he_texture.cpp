@@ -59,7 +59,7 @@ namespace hyperengine {
 			glBindTexture(GL_TEXTURE_2D, static_cast<GLuint>(param));
 		}
 
-		if (GLAD_GL_KHR_debug)
+		if (GLAD_GL_KHR_debug && !info.label.empty())
 			glObjectLabel(GL_TEXTURE, mHandle, static_cast<GLsizei>(info.label.size()), info.label.data());
 
 		mOrigin = std::string(info.origin);

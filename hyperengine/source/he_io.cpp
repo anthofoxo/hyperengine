@@ -54,12 +54,13 @@ namespace hyperengine {
 			glm::vec3 position;
 			glm::vec3 normal;
 			glm::vec2 uv;
+			glm::vec3 tangent;
 		};
 
 		static_assert(sizeof(aiVector3D) == sizeof(glm::vec3));
 
 		Assimp::Importer import;
-		aiScene const* scene = import.ReadFile(path, aiProcess_JoinIdenticalVertices | aiProcess_Triangulate | aiProcess_RemoveComponent | aiProcess_OptimizeGraph | aiProcess_OptimizeMeshes | aiProcess_ImproveCacheLocality | aiProcess_FixInfacingNormals);
+		aiScene const* scene = import.ReadFile(path, aiProcess_JoinIdenticalVertices | aiProcess_CalcTangentSpace | aiProcess_GenSmoothNormals | aiProcess_GenUVCoords | aiProcess_Triangulate | aiProcess_RemoveComponent | aiProcess_OptimizeGraph | aiProcess_OptimizeMeshes | aiProcess_ImproveCacheLocality | aiProcess_FixInfacingNormals);
 
 		if (!scene || scene->mFlags & AI_SCENE_FLAGS_INCOMPLETE || !scene->mRootNode) {
 			std::cerr << import.GetErrorString() << '\n';
@@ -77,8 +78,13 @@ namespace hyperengine {
 		vertices.reserve(mesh->mNumVertices);
 
 		for (unsigned int i = 0; i < mesh->mNumVertices; ++i) {
-			auto& textureCoord = mesh->mTextureCoords[0][i];
-			vertices.emplace_back(std::bit_cast<glm::vec3>(mesh->mVertices[i]), std::bit_cast<glm::vec3>(mesh->mNormals[i]), glm::vec2(textureCoord.x, textureCoord.y));
+			glm::vec2 texCoord = glm::vec2(0, 0);
+			if (mesh->HasTextureCoords(0)) {
+				auto& textureCoord = mesh->mTextureCoords[0][i];
+				texCoord = glm::vec2(textureCoord.x, textureCoord.y);
+			}
+
+			vertices.emplace_back(std::bit_cast<glm::vec3>(mesh->mVertices[i]), std::bit_cast<glm::vec3>(mesh->mNormals[i]), texCoord, std::bit_cast<glm::vec3>(mesh->mTangents[i]));
 		}
 
 		unsigned char elementPrimitiveWidth;
@@ -107,10 +113,12 @@ namespace hyperengine {
 			}
 		}
 
-		std::array<hyperengine::Mesh::Attribute, 3> attributes;
-		attributes[0] = { .size = 3, .type = GL_FLOAT, .offset = static_cast<GLuint>(offsetof(Vertex, position)) };
-		attributes[1] = { .size = 3, .type = GL_FLOAT, .offset = static_cast<GLuint>(offsetof(Vertex, normal)) };
-		attributes[2] = { .size = 2, .type = GL_FLOAT, .offset = static_cast<GLuint>(offsetof(Vertex, uv)) };
+		std::array<hyperengine::Mesh::Attribute, 4> attributes = {
+			hyperengine::Mesh::Attribute{ .size = 3, .type = GL_FLOAT, .offset = static_cast<GLuint>(offsetof(Vertex, position)) },
+			hyperengine::Mesh::Attribute{ .size = 3, .type = GL_FLOAT, .offset = static_cast<GLuint>(offsetof(Vertex, normal)) },
+			hyperengine::Mesh::Attribute{ .size = 2, .type = GL_FLOAT, .offset = static_cast<GLuint>(offsetof(Vertex, uv)) },
+			hyperengine::Mesh::Attribute{ .size = 3, .type = GL_FLOAT, .offset = static_cast<GLuint>(offsetof(Vertex, tangent)) },
+		};
 
 		return hyperengine::Mesh{{
 				.vertices = std::as_bytes(std::span(vertices)),

@@ -5,8 +5,14 @@ local objects = {
     name    = "ground",
     mesh    = "plane.obj",
     shader  = "terrain_basic.glsl",
-    textures = { tAlbedo = "grass.png" },
-    material = { uTiling = 75 }
+    textures = {
+      tAlbedo0 = "grass.png",
+      tAlbedo1 = "dirt.png",
+      tAlbedo2 = "flowers.png",
+      tAlbedo3 = "rocks.png",
+      tBlendmap = "blendmap.png"
+    },
+    material = { uTiling = { 50, 50, 50, 100 } }
   },
   {
     translation = { -10, 1, 0 },
@@ -18,7 +24,7 @@ local objects = {
     material = { uColor = { 0.0, 1.0, 1.0 } }
   },
   {
-    translation = { 0, 0, -10 },
+    translation = { -10, 0, -45 },
     scale = { 1, 1, 1 },
     name    = "dragon",
     mesh    = "dragon.obj",
@@ -28,31 +34,20 @@ local objects = {
     material = { uColor = { 1.0, 0.75, 0.4 } }
   },
   {
-    translation = { 5.5, 1.8, -3.3 },
+    translation = { 13, 1.8, -15 },
     scale = { 0.3, 0.3, 0.3 },
     name    = "barrel",
     mesh    = "barrel.obj",
-    textures = { tAlbedo = "barrel.png", tSpecular = "barrel_s.png" },
-    shader  = "opaque.glsl",
-    material = { uColor = { 1.0, 1.0, 1.0 } }
-  },
-  {
-    translation = { -20, 0, -30 },
-    scale = { 1, 1, 1 },
-    name    = "boulder",
-    mesh    = "boulder.obj",
-    textures = { tAlbedo = "boulder.png" },
-    shader  = "opaque.glsl",
-    material = { uColor = { 1.0, 1.0, 1.0 } }
+    textures = { tAlbedo = "barrel.png", tSpecular = "barrelS.png", tNormal = "barrelN.png" },
+    shader  = "normal.glsl"
   },
   {
     translation = { 8, 1, 0 },
     scale = { 0.01, 0.01, 0.01 },
     name    = "crate",
     mesh    = "crate.obj",
-    textures = { tAlbedo = "crate.png" },
-    shader  = "opaque.glsl",
-    material = { uColor = { 1.0, 1.0, 1.0 } }
+    textures = { tAlbedo = "crate.png", tNormal = "crateN.png" },
+    shader  = "normal.glsl",
   },
   {
     translation = { 3, 1.7, -3 },
@@ -64,8 +59,8 @@ local objects = {
     material = { uColor = { 1.0, 1.0, 1.0 } }
   },
   {
-    translation = { -8, -7, -12 },
-    scale = { 1, 1, 1 },
+    translation = { -2, 0, 2 },
+    scale = { 0.4, 0.4, 0.4 },
     name    = "fern",
     mesh    = "fern.obj",
     textures = { tAlbedo = "fern.png" },
