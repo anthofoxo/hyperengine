@@ -24,8 +24,6 @@ Additionally some macros are defined to make defining inputs and output easier.
 
 * `INPUT` is only expanded for vertex shaders.
 * `OUTPUT` is only expanded for fragment shaders.
-* `UNIFORM` is always expanded reguardless of shader types. This is purely for consistancy.
-* `CONST` is always expanded reguardless of shader types. This is purely for consistancy.
 * `VARYING` is defined to output from the vertex shader and input to fragment shaders. Similarly to how the `varying` specifier used to work.
 
 See shader sources in `./working` for examples.

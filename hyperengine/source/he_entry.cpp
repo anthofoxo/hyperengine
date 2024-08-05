@@ -29,16 +29,18 @@
 #include <glm/gtc/type_ptr.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 
-#include "he_common.hpp"
 #include "he_platform.hpp"
-#include "he_mesh.hpp"
-#include "he_window.hpp"
-#include "he_rdoc.hpp"
-#include "he_texture.hpp"
-#include "he_shader.hpp"
 #include "he_io.hpp"
 #include "he_util.hpp"
-#include "he_renderbuffer.hpp"
+#include "he_audio.hpp"
+
+#include "graphics/he_gl.hpp"
+#include "graphics/he_window.hpp"
+#include "graphics/he_rdoc.hpp"
+#include "graphics/he_mesh.hpp"
+#include "graphics/he_texture.hpp"
+#include "graphics/he_shader.hpp"
+#include "graphics/he_renderbuffer.hpp"
 
 #include <imgui.h>
 #include <backends/imgui_impl_glfw.h>
@@ -49,113 +51,16 @@
 #include <entt/entity/registry.hpp>
 #include <entt/entity/handle.hpp>
 
+// TODO: We should look into otherr text editing options out there
+// stb_textedit Seems like a good base for the text editor
 #include <TextEditor.h>
 
 #include <lua.hpp>
 
-#define MINIAUDIO_IMPLEMENTATION
-#include <miniaudio.h>
-
+// TODO: Along with internal textures, we should implment internal models, such as planes, cubes and spheres
 constexpr std::string_view kInternalTextureBlackName = "internal://black.png";
 constexpr std::string_view kInternalTextureWhiteName = "internal://white.png";
-
-struct AudioEngine final {
-	void init(std::string_view preferredDevice) {
-		if (ma_context_init(nullptr, 0, nullptr, &mContext) != MA_SUCCESS) {
-			// Error.
-		}
-
-		ma_device_info* pPlaybackInfos;
-		ma_uint32 playbackCount;
-		if (ma_context_get_devices(&mContext, &pPlaybackInfos, &playbackCount, nullptr, nullptr) != MA_SUCCESS) {
-			// Error.
-		}
-
-		bool isDeviceChosen = false;
-		ma_uint32 chosenPlaybackDeviceIndex = 0;
-
-		for (ma_uint32 iDevice = 0; iDevice < playbackCount; iDevice += 1) {
-			if (std::string_view(pPlaybackInfos[iDevice].name) == preferredDevice) {
-				chosenPlaybackDeviceIndex = iDevice;
-				isDeviceChosen = true;
-			}
-		}
-
-		if (!isDeviceChosen) {
-			for (ma_uint32 iDevice = 0; iDevice < playbackCount; iDevice += 1) {
-				if (pPlaybackInfos[iDevice].isDefault) {
-					chosenPlaybackDeviceIndex = iDevice;
-					isDeviceChosen = true;
-					break;
-				}
-			}
-		}
-
-		mDeviceName = pPlaybackInfos[chosenPlaybackDeviceIndex].name;
-
-		ma_device_config deviceConfig = ma_device_config_init(ma_device_type_playback);
-		deviceConfig.playback.pDeviceID = &pPlaybackInfos[chosenPlaybackDeviceIndex].id;
-		deviceConfig.pUserData = &mEngine;
-
-		deviceConfig.dataCallback = [](ma_device* pDevice, void* pOutput, void const* pInput, ma_uint32 frameCount) {
-			ma_engine_read_pcm_frames(static_cast<ma_engine*>(pDevice->pUserData), pOutput, frameCount, nullptr);
-		};
-
-		if (ma_device_init(&mContext, &deviceConfig, &mDevice) != MA_SUCCESS) {
-			// Error.
-		}
-
-		ma_engine_config engineConfig = ma_engine_config_init();
-		engineConfig.pDevice = &mDevice;
-
-		if (ma_engine_init(&engineConfig, &mEngine) != MA_SUCCESS) {
-			// Error.
-		}
-	}
-
-	void uninit() {
-		ma_engine_uninit(&mEngine);
-		ma_device_uninit(&mDevice);
-		ma_context_uninit(&mContext);
-	}
-
-	std::string mDeviceName;
-	ma_context mContext;
-	ma_device mDevice;
-	ma_engine mEngine;
-};
-
-#define HE_IMPL_EXPAND(x) case x: return #x
-static std::string_view glConstantToString(GLuint val) {
-	switch (val) {
-	HE_IMPL_EXPAND(GL_DEBUG_SOURCE_API);
-	HE_IMPL_EXPAND(GL_DEBUG_SOURCE_WINDOW_SYSTEM);
-	HE_IMPL_EXPAND(GL_DEBUG_SOURCE_SHADER_COMPILER);
-	HE_IMPL_EXPAND(GL_DEBUG_SOURCE_THIRD_PARTY);
-	HE_IMPL_EXPAND(GL_DEBUG_SOURCE_APPLICATION);
-	HE_IMPL_EXPAND(GL_DEBUG_SOURCE_OTHER);
-
-	HE_IMPL_EXPAND(GL_DEBUG_TYPE_ERROR);
-	HE_IMPL_EXPAND(GL_DEBUG_TYPE_DEPRECATED_BEHAVIOR);
-	HE_IMPL_EXPAND(GL_DEBUG_TYPE_UNDEFINED_BEHAVIOR);
-	HE_IMPL_EXPAND(GL_DEBUG_TYPE_PORTABILITY);
-	HE_IMPL_EXPAND(GL_DEBUG_TYPE_PERFORMANCE);
-	HE_IMPL_EXPAND(GL_DEBUG_TYPE_MARKER);
-	HE_IMPL_EXPAND(GL_DEBUG_TYPE_OTHER);
-
-	HE_IMPL_EXPAND(GL_DEBUG_SEVERITY_NOTIFICATION);
-	HE_IMPL_EXPAND(GL_DEBUG_SEVERITY_LOW);
-	HE_IMPL_EXPAND(GL_DEBUG_SEVERITY_MEDIUM);
-	HE_IMPL_EXPAND(GL_DEBUG_SEVERITY_HIGH);
-	default: return "?";
-	}
-}
-#undef HE_IMPL_EXPAND
-
-static void message_callback(GLenum source, GLenum type, GLuint id, GLenum severity, GLsizei length, GLchar const* message, void const* user_param) {
-	std::cout << glConstantToString(source) << ", " << glConstantToString(type) << ", " << glConstantToString(severity) << ", " << id << ": " << message << '\n';
-	//hyperengine::breakpointIfDebugging();
-}
+constexpr std::string_view kInternalTextureUvName = "internal://uv.png";
 
 struct Transform final {
 	glm::vec3 translation{};
@@ -231,13 +136,13 @@ auto glslShaderDef() {
 		"dvec2", "dvec3", "dvec4", "mat2", "mat3", "mat4",
 		"mat2x2", "mat2x3", "mat2x4", "mat3x2", "mat3x3", "mat3x4",
 		"mat4x2", "mat4x3", "mat4x4",
-		"sampler2D", "in", "out", "const", "uniform"
+		"sampler2D", "in", "out", "const", "uniform", "layout", "std140"
 	};
 	for (auto& k : keywords)
 		langDef.mKeywords.insert(k);
 
 	char const* const hyperengineMacros[] = {
-		"INPUT", "OUTPUT", "VARYING", "VERT", "FRAG", "UNIFORM", "CONST"
+		"INPUT", "OUTPUT", "VARYING", "VERT", "FRAG"
 	};
 
 	for (auto& k : hyperengineMacros) {
@@ -287,6 +192,7 @@ auto glslShaderDef() {
 	return langDef;
 }
 
+// TODO: Prevent text editor from closing when saving changes
 struct TextEditorInfo {
 	TextEditor editor;
 	bool enabled = false;
@@ -415,6 +321,8 @@ struct MeshFilterComponent {
 	std::shared_ptr<hyperengine::Mesh> mesh;
 };
 
+// TODO: It's possible to get heap corruption when hotswapping shaders with different material sizes,
+// need to look into fixing this
 struct MeshRendererComponent {
 	std::shared_ptr<hyperengine::ShaderProgram> shader;
 	std::vector<uint8_t> data;
@@ -441,6 +349,7 @@ struct MeshRendererComponent {
 		data.resize(allocation);
 		memset(data.data(), 0, allocation);
 
+		// TODO: Implment buffer abstraction, we actually leak memory a bit rn
 		glGenBuffers(1, &uniformBuffer);
 		glBindBuffer(GL_UNIFORM_BUFFER, uniformBuffer);
 		glBufferData(GL_UNIFORM_BUFFER, allocation, nullptr, GL_STREAM_DRAW);
@@ -460,8 +369,6 @@ struct CameraComponent {
 	float fov = 80.0f;
 };
 
-
-
 struct UniformEngineData {
 	glm::mat4 projection;
 	glm::mat4 view;
@@ -471,38 +378,37 @@ struct UniformEngineData {
 
 static_assert(sizeof(UniformEngineData) == 144); // Match std140 glsl layout
 
+struct Views final {
+	bool hierarchy = true;
+	bool properties = true;
+	bool viewport = true;
+	bool resourceManager = false;
+	bool imguiDemoWindow = false;
+
+	void drawUi() {
+		ImGui::MenuItem("Hierarchy", nullptr, &hierarchy);
+		ImGui::MenuItem("Properties", nullptr, &properties);
+		ImGui::MenuItem("Viewport", nullptr, &viewport);
+		ImGui::MenuItem("Resource Manager", nullptr, &resourceManager);
+		ImGui::Separator();
+		ImGui::MenuItem("Dear ImGui Demo", nullptr, &imguiDemoWindow);
+	}
+};
+
+template <class T, class UserPtr>
+bool drawComponentEditGui(entt::registry& registry, entt::entity entity, char const* name, UserPtr* ptr, void(*func)(T&, UserPtr*)) {
+	if (entity == entt::null) return false;
+	T* component = registry.try_get<T>(entity);
+	if (!component) return false;
+
+	if (ImGui::CollapsingHeader(name))
+		func(*component, ptr);
+
+	return true;
+}
+
 struct Engine final {
-	void init() {
-		mWindow = {{ .width = 1280, .height = 720, .title = "HyperEngine", .maximized = true }};
-
-		glfwMakeContextCurrent(mWindow.handle());
-		gladLoadGL(&glfwGetProcAddress);
-
-		if (GLAD_GL_KHR_debug) {
-			glEnable(GL_DEBUG_OUTPUT);
-			glEnable(GL_DEBUG_OUTPUT_SYNCHRONOUS);
-			glDebugMessageCallback(&message_callback, nullptr);
-			glDebugMessageControl(GL_DONT_CARE, GL_DONT_CARE, GL_DEBUG_SEVERITY_NOTIFICATION, 0, nullptr, GL_FALSE);
-		}
-
-		glfwSetWindowUserPointer(mWindow.handle(), this);
-		glfwSetWindowCloseCallback(mWindow.handle(), [](GLFWwindow* window) {
-			static_cast<Engine*>(glfwGetWindowUserPointer(window))->mRunning = false;
-		});
-
-		initImGui(mWindow);
-		mAudioEngine.init("");
-
-		{
-			entt::handle entity{ mRegistry, mRegistry.create() };
-			GameObjectComponent& gameObject = entity.emplace<GameObjectComponent>();
-			gameObject.transform.translation = glm::vec3(0, 1, 3);
-			gameObject.name = "MainCamera";
-			CameraComponent& camera = entity.emplace<CameraComponent>();
-		}
-
-
-		// Allocate internal textures
+	void createInternalTextures() {
 		{
 			unsigned char pixels[] = { 0, 0, 0, 255 };
 			hyperengine::Texture tex = { {.width = 1, .height = 1, .format = hyperengine::PixelFormat::kRgba8, .minFilter = GL_NEAREST, .magFilter = GL_NEAREST, .wrap = GL_CLAMP_TO_EDGE, .label = "internal black", .origin = kInternalTextureBlackName } };
@@ -517,157 +423,52 @@ struct Engine final {
 			mInternalTextureWhite = std::make_shared<hyperengine::Texture>(std::move(tex));
 			mResourceManager.mTextures[std::string(kInternalTextureWhiteName)] = mInternalTextureWhite;
 		}
-		
+		{
+			std::unique_ptr<uint8_t[]> pixels = std::make_unique<uint8_t[]>(256 * 256 * 4); // Large object, heap alloc this
 
-		lua_State* L = luaL_newstate();
-		
-		static const luaL_Reg loadedlibs[] = {
-		  //{LUA_GNAME, luaopen_base},
-		  //{LUA_LOADLIBNAME, luaopen_package},
-		  //{LUA_COLIBNAME, luaopen_coroutine},
-		  {LUA_TABLIBNAME, luaopen_table},
-		  //{LUA_IOLIBNAME, luaopen_io},
-		  //{LUA_OSLIBNAME, luaopen_os},
-		  //{LUA_STRLIBNAME, luaopen_string},
-		  //{LUA_MATHLIBNAME, luaopen_math},
-		  //{LUA_UTF8LIBNAME, luaopen_utf8},
-		  //{LUA_DBLIBNAME, luaopen_debug},
-		  {NULL, NULL}
-		};
-
-
-		const luaL_Reg* lib;
-		/* "require" functions from 'loadedlibs' and set results to global table */
-		for (lib = loadedlibs; lib->func; lib++) {
-			luaL_requiref(L, lib->name, lib->func, 1);
-			lua_pop(L, 1);  /* remove lib */
-		}
-
-
-		if (luaL_dofile(L, "scene.lua") != LUA_OK) {
-			std::cerr << lua_tostring(L, -1) << '\n';
-		}
-		else {
-			int t = lua_gettop(L); // Table index
-			lua_pushnil(L); // First key
-			while (lua_next(L, t) != 0) {
-				/* 'key' (at index -2) and 'value' (at index -1) */
-				entt::entity entity = mRegistry.create();
-				GameObjectComponent& gameObject = mRegistry.emplace<GameObjectComponent>(entity);
-				MeshFilterComponent& meshFilter = mRegistry.emplace<MeshFilterComponent>(entity);
-				MeshRendererComponent& meshRenderer = mRegistry.emplace<MeshRendererComponent>(entity);
-
-				lua_getfield(L, -1, "name");
-				if(lua_isstring(L, -1))
-					gameObject.name = lua_tostring(L, -1);
-				lua_pop(L, 1);
-
-				lua_getfield(L, -1, "mesh");
-				if (lua_isstring(L, -1))
-					meshFilter.mesh = mResourceManager.getMesh(lua_tostring(L, -1));
-				lua_pop(L, 1);
-
-				lua_getfield(L, -1, "shader");
-				if (lua_isstring(L, -1))
-					meshRenderer.shader = mResourceManager.getShaderProgram(lua_tostring(L, -1));
-				lua_pop(L, 1);
-
-				// Apply stored material information
-				if (meshRenderer.shader) {
-					
-					meshRenderer.allocateMaterialBuffer();
-
-					lua_getfield(L, -1, "material");
-
-					// Apply material settings if present
-					if (lua_istable(L, -1)) {
-
-						int materialTable = lua_gettop(L); // Table index
-						lua_pushnil(L);
-
-						while (lua_next(L, materialTable) != 0) {
-							/* 'key' (at index -2) and 'value' (at index -1) */
-
-							// Find material property in shader
-							auto it = meshRenderer.shader->materialInfo().find(lua_tostring(L, -2));
-							if (it != meshRenderer.shader->materialInfo().end()) {
-								auto offset = it->second.offset;
-								auto type = it->second.type;
-
-								// only works for floats rn
-								if (type == hyperengine::ShaderProgram::UniformType::kFloat && lua_isnumber(L, -1)) {
-									*((float*)(meshRenderer.data.data() + offset)) = static_cast<float>(lua_tonumber(L, -1));
-								}
-
-								if (type == hyperengine::ShaderProgram::UniformType::kVec3f && lua_istable(L, -1)) {
-									*((glm::vec3*)(meshRenderer.data.data() + offset)) = hyperengine::luaToVec3(L);
-								}
-
-								if (type == hyperengine::ShaderProgram::UniformType::kVec4f && lua_istable(L, -1)) {
-									*((glm::vec4*)(meshRenderer.data.data() + offset)) = hyperengine::luaToVec4(L);
-								}
-							}
-
-							lua_pop(L, 1);
-						}
-
-					}
-
-					lua_pop(L, 1);
+			for (int y = 0; y < 256; ++y)
+				for (int x = 0; x < 256; ++x) {
+					pixels.get()[x * 4 + y * 256 * 4 + 0] = x;
+					pixels.get()[x * 4 + y * 256 * 4 + 1] = y;
+					pixels.get()[x * 4 + y * 256 * 4 + 2] = 0;
+					pixels.get()[x * 4 + y * 256 * 4 + 3] = 255;
 				}
 
-				if (meshRenderer.shader) {
-					lua_getfield(L, -1, "textures");
-
-					// Apply textures
-					if (lua_istable(L, -1)) {
-
-						int textureTable = lua_gettop(L); // Table index
-						lua_pushnil(L);
-
-						while (lua_next(L, textureTable) != 0) {
-							/* 'key' (at index -2) and 'value' (at index -1) */
-
-							// Find texture property in shader
-							auto it = meshRenderer.shader->opaqueAssignments().find(lua_tostring(L, -2));
-							if (it != meshRenderer.shader->opaqueAssignments().end()) {	
-								meshRenderer.textures[it->second] = mResourceManager.getTexture(lua_tostring(L, -1));
-							}
-
-							lua_pop(L, 1);
-						}
-
-					}
-
-					lua_pop(L, 1);
-				}
-		
-
-				lua_getfield(L, -1, "translation");
-				if(lua_istable(L, -1))
-					gameObject.transform.translation = hyperengine::luaToVec3(L);
-				lua_pop(L, 1);
-
-				lua_getfield(L, -1, "scale");
-				if (lua_istable(L, -1))
-					gameObject.transform.scale = hyperengine::luaToVec3(L);
-				lua_pop(L, 1);
-
-				
-
-				lua_pop(L, 1); // remove value
-			}
+			hyperengine::Texture tex = { {.width = 256, .height = 256, .format = hyperengine::PixelFormat::kRgba8, .minFilter = GL_LINEAR, .magFilter = GL_LINEAR, .wrap = GL_REPEAT, .label = "internal uv", .origin = kInternalTextureUvName } };
+			tex.upload({ .xoffset = 0, .yoffset = 0, .width = 256, .height = 256, .format = hyperengine::PixelFormat::kRgba8, .pixels = pixels.get()});
+			mInternalTextureUv = std::make_shared<hyperengine::Texture>(std::move(tex));
+			mResourceManager.mTextures[std::string(kInternalTextureUvName)] = mInternalTextureUv;
 		}
-		
+	}
 
-		lua_pop(L, 1); // Pop table
+	void init() {
+		mWindow = {{ .width = 1280, .height = 720, .title = "HyperEngine", .maximized = true }};
 
-		lua_close(L);
+		glfwMakeContextCurrent(mWindow.handle());
+		gladLoadGL(&glfwGetProcAddress);
+
+		if (GLAD_GL_KHR_debug) {
+			glEnable(GL_DEBUG_OUTPUT);
+			glEnable(GL_DEBUG_OUTPUT_SYNCHRONOUS);
+			glDebugMessageCallback(&hyperengine::glMessageCallback, nullptr);
+			glDebugMessageControl(GL_DONT_CARE, GL_DONT_CARE, GL_DEBUG_SEVERITY_NOTIFICATION, 0, nullptr, GL_FALSE);
+		}
+
+		glfwSetWindowUserPointer(mWindow.handle(), this);
+		glfwSetWindowCloseCallback(mWindow.handle(), [](GLFWwindow* window) {
+			static_cast<Engine*>(glfwGetWindowUserPointer(window))->mRunning = false;
+		});
+
+		initImGui(mWindow);
+		mAudioEngine.init("");
+
+		createInternalTextures();
 
 		glEnable(GL_DEPTH_TEST);
 		glEnable(GL_CULL_FACE);
 		glCullFace(GL_BACK);
 
+		// TODO: Implment buffer abstraction, we actually leak memory a bit rn
 		glGenBuffers(1, &mEngineUniformBuffer);
 		glBindBuffer(GL_UNIFORM_BUFFER, mEngineUniformBuffer);
 		glBufferData(GL_UNIFORM_BUFFER, sizeof(decltype(mUniformEngineData)), nullptr, GL_DYNAMIC_DRAW);
@@ -683,8 +484,10 @@ struct Engine final {
 			glfwGetFramebufferSize(mWindow.handle(), &mFramebufferSize.x, &mFramebufferSize.y);
 
 			if (mFramebufferSize.x > 0 && mFramebufferSize.y > 0) {
+				glBindFramebuffer(GL_FRAMEBUFFER, 0);
 				imguiBeginFrame();
 				update();
+				glBindFramebuffer(GL_FRAMEBUFFER, 0);
 				imguiEndFrame();
 			}
 
@@ -695,22 +498,10 @@ struct Engine final {
 		mAudioEngine.uninit();
 	}
 
-	template <class T, class UserPtr>
-	bool drawComponentEditGui(entt::registry& registry, entt::entity entity, char const* name, UserPtr* ptr, void(*func)(T&, UserPtr*)) {
-		if (entity == entt::null) return false;
-		T* component = registry.try_get<T>(entity);
-		if (!component) return false;
-		
-		if (ImGui::CollapsingHeader(name))
-			func(*component, ptr);
-
-		return true;
-	}
-
 	void drawGuiProperties() {
-		if (!mViewProperties) return;
+		if (!mViews.properties) return;
 
-		if (ImGui::Begin("Properties", &mViewProperties)) {
+		if (ImGui::Begin("Properties", &mViews.properties)) {
 			if (selected != entt::null) {
 
 				bool hasGameObject = drawComponentEditGui<GameObjectComponent, Engine>(mRegistry, selected, "Game Object", this, [](auto& comp, auto* ptr) {
@@ -850,13 +641,9 @@ struct Engine final {
 	}
 
 	void drawGuiHierarchy() {
-		if (!mViewHierarchy) return;
+		if (!mViews.hierarchy) return;
 
-		if (ImGui::Begin("Hierarchy", &mViewHierarchy)) {
-			if (ImGui::Button("Create empty")) {
-				entt::entity entity = mRegistry.create();
-				mRegistry.emplace<GameObjectComponent>(entity);
-			}
+		if (ImGui::Begin("Hierarchy", &mViews.hierarchy)) {
 
 			for (auto&& [entity, gameObject] : mRegistry.view<GameObjectComponent>().each()) {
 				ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_Leaf;
@@ -875,9 +662,9 @@ struct Engine final {
 	}
 
 	void drawGuiResourceManager() {
-		if (!mViewResourceManager) return;
+		if (!mViews.resourceManager) return;
 
-		if (ImGui::Begin("Resource Manager", &mViewResourceManager)) {
+		if (ImGui::Begin("Resource Manager", &mViews.resourceManager)) {
 			if (ImGui::CollapsingHeader("Meshes")) {
 				for (auto& [k, v] : mResourceManager.mMeshes) {
 					if (ImGui::TreeNodeEx(k.c_str())) {
@@ -910,11 +697,174 @@ struct Engine final {
 		ImGui::End();
 	}
 
+	void loadScene(char const* path) {
+		mRegistry.clear();
+
+
+		{
+			entt::handle entity{ mRegistry, mRegistry.create() };
+			GameObjectComponent& gameObject = entity.emplace<GameObjectComponent>();
+			gameObject.transform.translation = glm::vec3(0, 1, 3);
+			gameObject.name = "MainCamera";
+			CameraComponent& camera = entity.emplace<CameraComponent>();
+		}
+
+		lua_State* L = luaL_newstate();
+
+		static const luaL_Reg loadedlibs[] = {
+			//{LUA_GNAME, luaopen_base},
+			//{LUA_LOADLIBNAME, luaopen_package},
+			//{LUA_COLIBNAME, luaopen_coroutine},
+			{LUA_TABLIBNAME, luaopen_table},
+			//{LUA_IOLIBNAME, luaopen_io},
+			//{LUA_OSLIBNAME, luaopen_os},
+			//{LUA_STRLIBNAME, luaopen_string},
+			//{LUA_MATHLIBNAME, luaopen_math},
+			//{LUA_UTF8LIBNAME, luaopen_utf8},
+			//{LUA_DBLIBNAME, luaopen_debug},
+			{NULL, NULL}
+		};
+
+
+		const luaL_Reg* lib;
+		/* "require" functions from 'loadedlibs' and set results to global table */
+		for (lib = loadedlibs; lib->func; lib++) {
+			luaL_requiref(L, lib->name, lib->func, 1);
+			lua_pop(L, 1);  /* remove lib */
+		}
+
+
+		if (luaL_dofile(L, path) != LUA_OK) {
+			std::cerr << lua_tostring(L, -1) << '\n';
+		}
+		else {
+			int t = lua_gettop(L); // Table index
+			lua_pushnil(L); // First key
+			while (lua_next(L, t) != 0) {
+				/* 'key' (at index -2) and 'value' (at index -1) */
+				entt::entity entity = mRegistry.create();
+				GameObjectComponent& gameObject = mRegistry.emplace<GameObjectComponent>(entity);
+				MeshFilterComponent& meshFilter = mRegistry.emplace<MeshFilterComponent>(entity);
+				MeshRendererComponent& meshRenderer = mRegistry.emplace<MeshRendererComponent>(entity);
+
+				lua_getfield(L, -1, "name");
+				if (lua_isstring(L, -1))
+					gameObject.name = lua_tostring(L, -1);
+				lua_pop(L, 1);
+
+				lua_getfield(L, -1, "mesh");
+				if (lua_isstring(L, -1))
+					meshFilter.mesh = mResourceManager.getMesh(lua_tostring(L, -1));
+				lua_pop(L, 1);
+
+				lua_getfield(L, -1, "shader");
+				if (lua_isstring(L, -1))
+					meshRenderer.shader = mResourceManager.getShaderProgram(lua_tostring(L, -1));
+				lua_pop(L, 1);
+
+				// Apply stored material information
+				if (meshRenderer.shader) {
+
+					meshRenderer.allocateMaterialBuffer();
+
+					lua_getfield(L, -1, "material");
+
+					// Apply material settings if present
+					if (lua_istable(L, -1)) {
+
+						int materialTable = lua_gettop(L); // Table index
+						lua_pushnil(L);
+
+						while (lua_next(L, materialTable) != 0) {
+							/* 'key' (at index -2) and 'value' (at index -1) */
+
+							// Find material property in shader
+							auto it = meshRenderer.shader->materialInfo().find(lua_tostring(L, -2));
+							if (it != meshRenderer.shader->materialInfo().end()) {
+								auto offset = it->second.offset;
+								auto type = it->second.type;
+
+								// only works for floats rn
+								if (type == hyperengine::ShaderProgram::UniformType::kFloat && lua_isnumber(L, -1)) {
+									*((float*)(meshRenderer.data.data() + offset)) = static_cast<float>(lua_tonumber(L, -1));
+								}
+
+								if (type == hyperengine::ShaderProgram::UniformType::kVec3f && lua_istable(L, -1)) {
+									*((glm::vec3*)(meshRenderer.data.data() + offset)) = hyperengine::luaToVec3(L);
+								}
+
+								if (type == hyperengine::ShaderProgram::UniformType::kVec4f && lua_istable(L, -1)) {
+									*((glm::vec4*)(meshRenderer.data.data() + offset)) = hyperengine::luaToVec4(L);
+								}
+							}
+
+							lua_pop(L, 1);
+						}
+
+					}
+
+					lua_pop(L, 1);
+				}
+
+				if (meshRenderer.shader) {
+					lua_getfield(L, -1, "textures");
+
+					// Apply textures
+					if (lua_istable(L, -1)) {
+
+						int textureTable = lua_gettop(L); // Table index
+						lua_pushnil(L);
+
+						while (lua_next(L, textureTable) != 0) {
+							/* 'key' (at index -2) and 'value' (at index -1) */
+
+							// Find texture property in shader
+							auto it = meshRenderer.shader->opaqueAssignments().find(lua_tostring(L, -2));
+							if (it != meshRenderer.shader->opaqueAssignments().end()) {
+								meshRenderer.textures[it->second] = mResourceManager.getTexture(lua_tostring(L, -1));
+							}
+
+							lua_pop(L, 1);
+						}
+
+					}
+
+					lua_pop(L, 1);
+				}
+
+
+				lua_getfield(L, -1, "translation");
+				if (lua_istable(L, -1))
+					gameObject.transform.translation = hyperengine::luaToVec3(L);
+				lua_pop(L, 1);
+
+				lua_getfield(L, -1, "scale");
+				if (lua_istable(L, -1))
+					gameObject.transform.scale = hyperengine::luaToVec3(L);
+				lua_pop(L, 1);
+
+
+
+				lua_pop(L, 1); // remove value
+			}
+		}
+
+
+		lua_pop(L, 1); // Pop table
+
+		lua_close(L);
+	}
+
 	void drawUi() {
 		ImGui::DockSpaceOverViewport();
 
 		if (ImGui::BeginMainMenuBar()) {
 			if (ImGui::BeginMenu("File")) {
+				if (ImGui::MenuItem("Load", nullptr, nullptr)) {
+					loadScene("scene.lua");
+				}
+
+				ImGui::Separator();
 				if (ImGui::MenuItem("Quit", "Alt+F4", nullptr))
 					mRunning = false;
 
@@ -922,12 +872,19 @@ struct Engine final {
 			}
 
 			if (ImGui::BeginMenu("View")) {
-				ImGui::MenuItem("Hierarchy", nullptr, &mViewHierarchy);
-				ImGui::MenuItem("Properties", nullptr, &mViewProperties);
-				ImGui::MenuItem("Viewport", nullptr, &mViewViewport);
-				ImGui::MenuItem("Resource Manager", nullptr, &mViewResourceManager);
-				ImGui::Separator();
-				ImGui::MenuItem("Dear ImGui Demo", nullptr, &mViewImGuiDemoWindow);
+				mViews.drawUi();
+				ImGui::EndMenu();
+			}
+
+			if (ImGui::BeginMenu("Entity")) {
+				if (ImGui::MenuItem("Create empty", nullptr, nullptr)) {
+					entt::entity entity = mRegistry.create();
+					mRegistry.emplace<GameObjectComponent>(entity);
+				}
+
+				if (ImGui::MenuItem("Clear All", nullptr, nullptr)) {
+					mRegistry.clear();
+				}
 
 				ImGui::EndMenu();
 			}
@@ -938,10 +895,11 @@ struct Engine final {
 		if (ImGui::Begin("Debug")) {
 			ImGui::SeparatorText("GPU Info");
 
-			ImGui::LabelText("Renderer", "%s", glGetString(GL_RENDERER));
-			ImGui::LabelText("Vendor", "%s", glGetString(GL_VENDOR));
-			ImGui::LabelText("Version", "%s", glGetString(GL_VERSION));
-			ImGui::LabelText("GLSL Version", "%s", glGetString(GL_SHADING_LANGUAGE_VERSION));
+			auto const& info = hyperengine::glContextInfo();
+			ImGui::LabelText("Renderer", "%s", info.renderer.c_str());
+			ImGui::LabelText("Vendor", "%s", info.vendor.c_str());
+			ImGui::LabelText("Version", "%s", info.version.c_str());
+			ImGui::LabelText("GLSL Version", "%s", info.glslVersion.c_str());
 
 			ImGui::SeparatorText("Rendering values");
 
@@ -993,17 +951,17 @@ struct Engine final {
 		drawGuiHierarchy();
 		drawGuiProperties();
 
-		if (mViewImGuiDemoWindow)
-			ImGui::ShowDemoWindow(&mViewImGuiDemoWindow);
+		if (mViews.imguiDemoWindow)
+			ImGui::ShowDemoWindow(&mViews.imguiDemoWindow);
 	}
 
 	void update() {
 		drawUi();
 
-		if (mViewViewport) {
+		if (mViews.viewport) {
 			ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, { 0, 0 });
 			ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0);
-			if (ImGui::Begin("Viewport", &mViewViewport)) {
+			if (ImGui::Begin("Viewport", &mViews.viewport)) {
 				static_assert(sizeof(ImVec2) == sizeof(glm::vec2));
 
 				glm::ivec2 contentAvail = std::bit_cast<glm::vec2>(ImGui::GetContentRegionAvail());
@@ -1128,8 +1086,6 @@ struct Engine final {
 								if (!meshRenderer.shader) continue;
 								if (!meshFilter.mesh) continue;
 
-								if (!meshRenderer.shader->cull()) glDisable(GL_CULL_FACE);
-
 								// Assign all needed textures
 								for (auto const& [k, v] : meshRenderer.shader->opaqueAssignments()) {
 
@@ -1142,6 +1098,7 @@ struct Engine final {
 								// Upload material changes and bind buffer for prep
 								meshRenderer.uploadAndPrep();
 
+								if (!meshRenderer.shader->cull()) glDisable(GL_CULL_FACE);
 								meshRenderer.shader->bind();
 								meshRenderer.shader->uniformMat4f("uTransform", gameObject.transform.get());
 								meshRenderer.shader->uniform3f("uSkyColor", mSkyColor);
@@ -1168,7 +1125,7 @@ struct Engine final {
 
 	hyperengine::Window mWindow;
 
-	AudioEngine mAudioEngine;
+	hyperengine::AudioEngine mAudioEngine;
 	entt::registry mRegistry;
 	ResourceManager mResourceManager;
 	entt::entity selected = entt::null;
@@ -1176,6 +1133,7 @@ struct Engine final {
 	GLuint mEngineUniformBuffer = 0;
 	UniformEngineData mUniformEngineData;
 
+	// TODO: Make framebuffer abstraction
 	GLuint mFramebuffer = 0;
 	hyperengine::Renderbuffer mFramebufferDepth;
 	hyperengine::Texture mFramebufferColor;
@@ -1184,19 +1142,15 @@ struct Engine final {
 	glm::vec3 mSkyColor = { 0.7f, 0.8f, 0.9f };
 	bool mWireframe = false;
 
-
 	bool mRunning = true;
-	bool mViewHierarchy = true;
-	bool mViewProperties = true;
-	bool mViewViewport = true;
-	bool mViewResourceManager = false;
-	bool mViewImGuiDemoWindow = false;
+	Views mViews;
 	glm::ivec2 mFramebufferSize{};
 	ImGuizmo::OPERATION mOperation = ImGuizmo::OPERATION::TRANSLATE;
 	ImGuizmo::MODE mMode = ImGuizmo::MODE::LOCAL;
 
 	std::shared_ptr<hyperengine::Texture> mInternalTextureBlack;
 	std::shared_ptr<hyperengine::Texture> mInternalTextureWhite;
+	std::shared_ptr<hyperengine::Texture> mInternalTextureUv;
 };
 
 int main(int argc, char* argv[]) {

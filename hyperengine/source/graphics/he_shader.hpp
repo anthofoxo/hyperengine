@@ -50,12 +50,15 @@ namespace hyperengine {
 		inline auto const& materialInfo() const { return mMaterialInfo; };
 		inline std::string_view editHint(std::string_view val) const { auto it = mEditHints.find(val); if (it == mEditHints.end()) return ""; else return it->second; };
 		inline int materialAllocationSize() const { return mMaterialAllocationSize; }
+		inline auto const& uniforms() const { return mUniforms; }
 
 		Uniform getUniform(std::string_view name) const;
 		GLint getUniformLocation(std::string_view name) const;
 		void uniform1i(std::string_view name, int v0);
 		void uniform1f(std::string_view name, float v0);
+		void uniform2f(std::string_view name, glm::vec2 const& v0);
 		void uniform3f(std::string_view name, glm::vec3 const& v0);
+		void uniform4f(std::string_view name, glm::vec4 const& v0);
 		void uniformMat4f(std::string_view name, glm::mat4 const& v0);
 
 		void bind();

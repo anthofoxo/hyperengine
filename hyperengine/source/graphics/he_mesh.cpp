@@ -67,7 +67,7 @@ namespace hyperengine {
 			mType = GL_UNSIGNED_INT;
 		}
 
-		mCount = info.elements.size();
+		mCount = static_cast<GLsizei>(info.elements.size());
 
 		mOrigin = std::string(info.origin);
 	}

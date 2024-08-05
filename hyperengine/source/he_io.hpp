@@ -2,8 +2,8 @@
 #include <string>
 #include <vector>
 
-#include "he_mesh.hpp"
-#include "he_texture.hpp"
+#include "graphics/he_mesh.hpp"
+#include "graphics/he_texture.hpp"
 
 namespace hyperengine {
 	std::optional<std::string> readFileString(char const* path);

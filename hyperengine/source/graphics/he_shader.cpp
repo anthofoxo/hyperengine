@@ -229,9 +229,19 @@ namespace hyperengine {
 		return it->second.location;
 	}
 
+	void ShaderProgram::uniform2f(std::string_view name, glm::vec2 const& v0) {
+		bind();
+		glUniform2fv(getUniformLocation(name), 1, glm::value_ptr(v0));
+	}
+
 	void ShaderProgram::uniform3f(std::string_view name, glm::vec3 const& v0) {
 		bind();
 		glUniform3fv(getUniformLocation(name), 1, glm::value_ptr(v0));
+	}
+
+	void ShaderProgram::uniform4f(std::string_view name, glm::vec4 const& v0) {
+		bind();
+		glUniform4fv(getUniformLocation(name), 1, glm::value_ptr(v0));
 	}
 
 	void ShaderProgram::uniform1i(std::string_view name, int v0) {

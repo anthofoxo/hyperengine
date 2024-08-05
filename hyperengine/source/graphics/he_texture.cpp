@@ -1,27 +1,20 @@
 #include "he_texture.hpp"
 
+#include "he_gl.hpp"
 #include <glm/glm.hpp>
 
 namespace hyperengine {
 	Texture::Texture(CreateInfo const& info) {
-		int maxLevel = static_cast<int>(glm::floor(glm::log2(static_cast<float>(glm::max(info.width, info.height)))));
-
-		float maxAnisotropy = 0;
+		int maxLevel = 0;
+		float maxAnisotropy = 0.0f;
 
 		if (info.minFilter == GL_NEAREST_MIPMAP_NEAREST ||
 			info.minFilter == GL_LINEAR_MIPMAP_NEAREST ||
 			info.minFilter == GL_NEAREST_MIPMAP_LINEAR ||
 			info.minFilter == GL_LINEAR_MIPMAP_LINEAR
 			) {
-			if (GLAD_GL_ARB_texture_filter_anisotropic || GLAD_GL_EXT_texture_filter_anisotropic) {
-				// These constants should be the same
-				static_assert(GL_MAX_TEXTURE_MAX_ANISOTROPY == GL_MAX_TEXTURE_MAX_ANISOTROPY_EXT);
-				static_assert(GL_TEXTURE_MAX_ANISOTROPY == GL_TEXTURE_MAX_ANISOTROPY_EXT);
-				glGetFloatv(GL_MAX_TEXTURE_MAX_ANISOTROPY, &maxAnisotropy);
-			}
-		}
-		else {
-			maxLevel = 0;
+			maxLevel = static_cast<int>(glm::floor(glm::log2(static_cast<float>(glm::max(info.width, info.height)))));
+			maxAnisotropy = glm::min(hyperengine::glContextInfo().maxAnisotropy, 8.0f); // Use 8x anisotropy max
 		}
 
 		if (GLAD_GL_ARB_direct_state_access) {
