@@ -34,6 +34,7 @@
 #include "he_util.hpp"
 #include "he_audio.hpp"
 
+#include "graphics/he_framebuffer.hpp"
 #include "graphics/he_gl.hpp"
 #include "graphics/he_window.hpp"
 #include "graphics/he_rdoc.hpp"
@@ -484,10 +485,10 @@ struct Engine final {
 			glfwGetFramebufferSize(mWindow.handle(), &mFramebufferSize.x, &mFramebufferSize.y);
 
 			if (mFramebufferSize.x > 0 && mFramebufferSize.y > 0) {
-				glBindFramebuffer(GL_FRAMEBUFFER, 0);
+				hyperengine::Framebuffer().bind();
 				imguiBeginFrame();
 				update();
-				glBindFramebuffer(GL_FRAMEBUFFER, 0);
+				hyperengine::Framebuffer().bind();
 				imguiEndFrame();
 			}
 
@@ -989,18 +990,12 @@ struct Engine final {
 							.label =  "framebuffer viewport depth"
 						}};
 
-						if (mFramebuffer)
-							glDeleteFramebuffers(1, &mFramebuffer);
-
-						glGenFramebuffers(1, &mFramebuffer);
-						glBindFramebuffer(GL_FRAMEBUFFER, mFramebuffer);
-						glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, mFramebufferColor.handle(), 0);
-						glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, mFramebufferDepth.handle());
+						mFramebuffer = hyperengine::Framebuffer::CreateInfo();
+						mFramebuffer.texture2D(GL_COLOR_ATTACHMENT0, mFramebufferColor);
+						mFramebuffer.renderbuffer(GL_DEPTH_ATTACHMENT, mFramebufferDepth);
 					}
 
-					glBindFramebuffer(GL_FRAMEBUFFER, mFramebuffer);
-
-					
+					mFramebuffer.bind();
 
 					glm::mat4 cameraProjection;
 					Transform* cameraTransform =  nullptr;
@@ -1075,7 +1070,7 @@ struct Engine final {
 							glBindBuffer(GL_UNIFORM_BUFFER, 0);
 
 							// Render scene
-							glBindFramebuffer(GL_FRAMEBUFFER, mFramebuffer);
+							mFramebuffer.bind();
 							glViewport(0, 0, mViewportSize.x, mViewportSize.y);
 							glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 							glClearColor(mSkyColor.r, mSkyColor.g, mSkyColor.b, 1.0f);
@@ -1133,8 +1128,7 @@ struct Engine final {
 	GLuint mEngineUniformBuffer = 0;
 	UniformEngineData mUniformEngineData;
 
-	// TODO: Make framebuffer abstraction
-	GLuint mFramebuffer = 0;
+	hyperengine::Framebuffer mFramebuffer;
 	hyperengine::Renderbuffer mFramebufferDepth;
 	hyperengine::Texture mFramebufferColor;
 	glm::ivec2 mViewportSize{};
