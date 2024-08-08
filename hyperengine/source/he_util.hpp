@@ -47,4 +47,11 @@ namespace hyperengine {
 	glm::vec2 luaToVec2(lua_State* L);
 	glm::vec3 luaToVec3(lua_State* L);
 	glm::vec4 luaToVec4(lua_State* L);
+
+	struct Uuid final {
+		uint64_t mUuid = 0;
+		inline Uuid(uint64_t uuid = 0) noexcept : mUuid(uuid) {}
+		inline operator uint64_t() const { return mUuid; }
+		static [[nodiscard]] Uuid generate();
+	};
 }

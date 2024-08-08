@@ -6,10 +6,20 @@
 #include "he_texture.hpp"
 #include "he_renderbuffer.hpp"
 
+#include <variant>
+#include <functional>
+#include <span>
+
 namespace hyperengine {
 	class Framebuffer final {
 	public:
+		struct Attachment final {
+			GLenum attachment;
+			std::variant<std::reference_wrapper<hyperengine::Texture>, std::reference_wrapper<hyperengine::Renderbuffer>> source;
+		};
+
 		struct CreateInfo final {
+			std::span<const Attachment> attachments;
 		};
 
 		constexpr Framebuffer() noexcept = default;
@@ -21,9 +31,6 @@ namespace hyperengine {
 		~Framebuffer() noexcept;
 
 		inline GLuint handle() const { return mHandle; }
-
-		void texture2D(GLenum attachment, hyperengine::Texture& texture);
-		void renderbuffer(GLenum attachment, hyperengine::Renderbuffer& renderbuffer);
 
 		void bind();
 	private:

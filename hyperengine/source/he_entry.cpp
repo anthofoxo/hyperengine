@@ -4,11 +4,16 @@
 #	undef far
 #endif
 
+#ifdef _MSC_VER
+#	define HE_ALLOCATOR(size) _Ret_notnull_ _Post_writable_byte_size_(size) __declspec(allocator)
+#else
+#	define HE_ALLOCATOR(size)
+#endif
+
 #include <glad/gl.h>
 #include <GLFW/glfw3.h>
 
 #include <string>
-#include <iostream>
 #include <optional>
 #include <set>
 #include <vector>
@@ -57,6 +62,26 @@
 #include <TextEditor.h>
 
 #include <lua.hpp>
+
+#include <tracy/Tracy.hpp>
+#include <tracy/TracyOpenGL.hpp>
+
+#include <spdlog/spdlog.h>
+
+#include <tinyfiledialogs.h>
+
+[[nodiscard]] HE_ALLOCATOR(count) void* operator new(std::size_t count)
+{
+	void* ptr = malloc(count);
+	if (ptr == nullptr) throw std::bad_alloc();
+	TracyAlloc(ptr, count);
+	return ptr;
+}
+
+void operator delete(void* ptr) noexcept {
+	TracyFree(ptr);
+	free(ptr);
+}
 
 // TODO: Along with internal textures, we should implment internal models, such as planes, cubes and spheres
 constexpr std::string_view kInternalTextureBlackName = "internal://black.png";
@@ -108,6 +133,8 @@ static void destroyImGui() {
 }
 
 static void imguiBeginFrame() {
+	ZoneScoped;
+	TracyGpuZone(TracyFunction);
 	ImGui_ImplOpenGL3_NewFrame();
 	ImGui_ImplGlfw_NewFrame();
 	ImGui::NewFrame();
@@ -116,6 +143,8 @@ static void imguiBeginFrame() {
 }
 
 static void imguiEndFrame() {
+	ZoneScoped;
+	TracyGpuZone(TracyFunction);
 	ImGui::Render();
 	ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
 
@@ -309,11 +338,12 @@ struct ResourceManager final {
 
 struct GameObjectComponent final {
 	std::string name;
+	hyperengine::Uuid uuid = hyperengine::Uuid::generate();
 	Transform transform;
 
 	GameObjectComponent() {
 		std::stringstream ss;
-		ss << "unnamed 0x" << std::hex << (void*)this;
+		ss << "unnamed " << std::hex << (uint64_t)uuid;
 		name = ss.str();
 	}
 };
@@ -385,6 +415,7 @@ struct Views final {
 	bool viewport = true;
 	bool resourceManager = false;
 	bool imguiDemoWindow = false;
+	bool experimentAudio = false;
 
 	void drawUi() {
 		ImGui::MenuItem("Hierarchy", nullptr, &hierarchy);
@@ -393,6 +424,8 @@ struct Views final {
 		ImGui::MenuItem("Resource Manager", nullptr, &resourceManager);
 		ImGui::Separator();
 		ImGui::MenuItem("Dear ImGui Demo", nullptr, &imguiDemoWindow);
+		ImGui::SeparatorText("Experiments");
+		ImGui::MenuItem("Audio", nullptr, &experimentAudio);
 	}
 };
 
@@ -448,9 +481,12 @@ struct Engine final {
 		glfwMakeContextCurrent(mWindow.handle());
 		gladLoadGL(&glfwGetProcAddress);
 
+		TracyGpuContext;
+
 		if (GLAD_GL_KHR_debug) {
 			glEnable(GL_DEBUG_OUTPUT);
 			glEnable(GL_DEBUG_OUTPUT_SYNCHRONOUS);
+			glDebugMessageCallback(&hyperengine::glMessageCallback, nullptr);
 			glDebugMessageCallback(&hyperengine::glMessageCallback, nullptr);
 			glDebugMessageControl(GL_DONT_CARE, GL_DONT_CARE, GL_DEBUG_SEVERITY_NOTIFICATION, 0, nullptr, GL_FALSE);
 		}
@@ -458,6 +494,17 @@ struct Engine final {
 		glfwSetWindowUserPointer(mWindow.handle(), this);
 		glfwSetWindowCloseCallback(mWindow.handle(), [](GLFWwindow* window) {
 			static_cast<Engine*>(glfwGetWindowUserPointer(window))->mRunning = false;
+		});
+
+		glfwSetKeyCallback(mWindow.handle(), [](GLFWwindow* window, int key, int scancode, int action, int mods) {
+			if (action == GLFW_PRESS && key == GLFW_KEY_O && mods == GLFW_MOD_CONTROL)
+				static_cast<Engine*>(glfwGetWindowUserPointer(window))->openSceneDialogOption();
+
+			if (action == GLFW_PRESS && key == GLFW_KEY_N && mods == GLFW_MOD_CONTROL)
+				static_cast<Engine*>(glfwGetWindowUserPointer(window))->fileNewScene();
+
+			if (action == GLFW_PRESS && key == GLFW_KEY_N && mods == (GLFW_MOD_CONTROL | GLFW_MOD_SHIFT))
+				static_cast<Engine*>(glfwGetWindowUserPointer(window))->fileEntityCreateEmpty();
 		});
 
 		initImGui(mWindow);
@@ -493,20 +540,40 @@ struct Engine final {
 			}
 
 			mWindow.swapBuffers();
+
+			TracyGpuCollect;
+			FrameMark;
 		}
 
 		destroyImGui();
 		mAudioEngine.uninit();
+
+		TracyGpuCollect;
+		FrameMark;
+	}
+
+	void audioExperiment() {
+		if (!mViews.experimentAudio) return;
+
+		if (ImGui::Begin("Audio Experiment", &mViews.experimentAudio)) {
+			static std::string source;
+			ImGui::InputText("Source", &source);
+			if (ImGui::Button("Play")) {
+				ma_engine_play_sound(&mAudioEngine.mEngine, source.c_str(), nullptr);
+			}
+		}
+		ImGui::End();
 	}
 
 	void drawGuiProperties() {
 		if (!mViews.properties) return;
 
 		if (ImGui::Begin("Properties", &mViews.properties)) {
-			if (selected != entt::null) {
+			if (mSelected != entt::null) {
 
-				bool hasGameObject = drawComponentEditGui<GameObjectComponent, Engine>(mRegistry, selected, "Game Object", this, [](auto& comp, auto* ptr) {
+				bool hasGameObject = drawComponentEditGui<GameObjectComponent, Engine>(mRegistry, mSelected, "Game Object", this, [](auto& comp, auto* ptr) {
 					ImGui::InputText("Name", &comp.name);
+					ImGui::LabelText("Uuid", "%p", comp.uuid);
 					ImGui::DragFloat3("Translation", glm::value_ptr(comp.transform.translation), 0.1f);
 					glm::vec3 oldEuler = glm::degrees(glm::eulerAngles(comp.transform.orientation));
 					glm::vec3 newEuler = oldEuler;
@@ -519,7 +586,7 @@ struct Engine final {
 					ImGui::DragFloat3("Scale", glm::value_ptr(comp.transform.scale), 0.1f);
 				});
 
-				bool hasMeshFilter = drawComponentEditGui<MeshFilterComponent, Engine>(mRegistry, selected, "Mesh Filter", this, [](auto& comp, auto* ptr) {
+				bool hasMeshFilter = drawComponentEditGui<MeshFilterComponent, Engine>(mRegistry, mSelected, "Mesh Filter", this, [](auto& comp, auto* ptr) {
 					if (comp.mesh)
 						ImGui::LabelText("Resource", "%s", comp.mesh->origin().c_str());
 					else
@@ -540,7 +607,7 @@ struct Engine final {
 					}
 				});
 
-				bool hasMeshRenderer = drawComponentEditGui<MeshRendererComponent, Engine>(mRegistry, selected, "Mesh Renderer", this, [](auto& comp, auto* ptr) {
+				bool hasMeshRenderer = drawComponentEditGui<MeshRendererComponent, Engine>(mRegistry, mSelected, "Mesh Renderer", this, [](auto& comp, auto* ptr) {
 					if (comp.shader)
 						ImGui::LabelText("Resource", "%s", comp.shader->origin().c_str());
 					else
@@ -626,15 +693,17 @@ struct Engine final {
 					}
 				});
 
-				bool hasCamera = drawComponentEditGui<CameraComponent, Engine>(mRegistry, selected, "Camera", this, [](auto& comp, auto* ptr) {
+				bool hasCamera = drawComponentEditGui<CameraComponent, Engine>(mRegistry, mSelected, "Camera", this, [](auto& comp, auto* ptr) {
 					ImGui::DragFloat("Fov", &comp.fov, 1.0f, 10.0f, 170.0f);
 					ImGui::DragFloatRange2("Clipping planes", &comp.clippingPlanes.x, &comp.clippingPlanes.y, 0.1f, 0.001f, 1000.0f);
 				});
 
-				if (!hasGameObject && ImGui::Button("Add Game Object")) mRegistry.emplace<GameObjectComponent>(selected);
-				if (!hasMeshFilter && ImGui::Button("Add Mesh Filter")) mRegistry.emplace<MeshFilterComponent>(selected);
-				if (!hasMeshRenderer && ImGui::Button("Add Mesh Renderer")) mRegistry.emplace<MeshRendererComponent>(selected);
-				if (!hasCamera && ImGui::Button("Add Camera")) mRegistry.emplace<CameraComponent>(selected);
+				ImGui::SeparatorText("Add Component");
+
+				if (!hasGameObject && ImGui::Button("Game Object")) mRegistry.emplace<GameObjectComponent>(mSelected);
+				if (!hasMeshFilter && ImGui::Button("Mesh Filter")) mRegistry.emplace<MeshFilterComponent>(mSelected);
+				if (!hasMeshRenderer && ImGui::Button("Mesh Renderer")) mRegistry.emplace<MeshRendererComponent>(mSelected);
+				if (!hasCamera && ImGui::Button("Camera")) mRegistry.emplace<CameraComponent>(mSelected);
 			}
 		}
 		ImGui::End();
@@ -642,18 +711,27 @@ struct Engine final {
 	}
 
 	void drawGuiHierarchy() {
+		ZoneScoped;
+
 		if (!mViews.hierarchy) return;
 
 		if (ImGui::Begin("Hierarchy", &mViews.hierarchy)) {
 
+			ImGui::BeginDisabled(mSelected == entt::null);
+			if (ImGui::SmallButton("Delete Selected")) {
+				mRegistry.destroy(mSelected);
+				mSelected = entt::null;
+			}
+			ImGui::EndDisabled();
+
 			for (auto&& [entity, gameObject] : mRegistry.view<GameObjectComponent>().each()) {
 				ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_Leaf;
-				if (selected == entity)
+				if (mSelected == entity)
 					flags |= ImGuiTreeNodeFlags_Selected;
 
 				bool opened = ImGui::TreeNodeEx((void*)(uintptr_t)entity, flags, "%s", gameObject.name.c_str());
 				if (ImGui::IsItemActive())
-					selected = entity;
+					mSelected = entity;
 
 				if (opened)
 					ImGui::TreePop();
@@ -663,6 +741,8 @@ struct Engine final {
 	}
 
 	void drawGuiResourceManager() {
+		ZoneScoped;
+
 		if (!mViews.resourceManager) return;
 
 		if (ImGui::Begin("Resource Manager", &mViews.resourceManager)) {
@@ -736,7 +816,7 @@ struct Engine final {
 
 
 		if (luaL_dofile(L, path) != LUA_OK) {
-			std::cerr << lua_tostring(L, -1) << '\n';
+			spdlog::error("Lua error: {}", lua_tostring(L, -1));
 		}
 		else {
 			int t = lua_gettop(L); // Table index
@@ -785,23 +865,24 @@ struct Engine final {
 								auto offset = it->second.offset;
 								auto type = it->second.type;
 
-								// only works for floats rn
 								if (type == hyperengine::ShaderProgram::UniformType::kFloat && lua_isnumber(L, -1)) {
 									*((float*)(meshRenderer.data.data() + offset)) = static_cast<float>(lua_tonumber(L, -1));
 								}
-
-								if (type == hyperengine::ShaderProgram::UniformType::kVec3f && lua_istable(L, -1)) {
+								else if (type == hyperengine::ShaderProgram::UniformType::kVec2f && lua_istable(L, -1)) {
+									*((glm::vec2*)(meshRenderer.data.data() + offset)) = hyperengine::luaToVec2(L);
+								}
+								else if (type == hyperengine::ShaderProgram::UniformType::kVec3f && lua_istable(L, -1)) {
 									*((glm::vec3*)(meshRenderer.data.data() + offset)) = hyperengine::luaToVec3(L);
 								}
-
-								if (type == hyperengine::ShaderProgram::UniformType::kVec4f && lua_istable(L, -1)) {
+								else if (type == hyperengine::ShaderProgram::UniformType::kVec4f && lua_istable(L, -1)) {
 									*((glm::vec4*)(meshRenderer.data.data() + offset)) = hyperengine::luaToVec4(L);
 								}
+								else
+									spdlog::warn("Unsupported uniform type");
 							}
 
 							lua_pop(L, 1);
 						}
-
 					}
 
 					lua_pop(L, 1);
@@ -844,29 +925,48 @@ struct Engine final {
 					gameObject.transform.scale = hyperengine::luaToVec3(L);
 				lua_pop(L, 1);
 
-
-
 				lua_pop(L, 1); // remove value
 			}
 		}
-
 
 		lua_pop(L, 1); // Pop table
 
 		lua_close(L);
 	}
 
+	void openSceneDialogOption() {
+		char const* filter = "*.lua";
+		char* source = tinyfd_openFileDialog("Open Scene", "./", 1, &filter, "Lua Files (*.lua)", false);
+
+		if (source)
+			loadScene(source);
+	}
+
+	void fileNewScene() {
+		mRegistry.clear();
+		mSelected = entt::null;
+	}
+
+	void fileEntityCreateEmpty() {
+		mSelected = mRegistry.create();
+		mRegistry.emplace<GameObjectComponent>(mSelected);
+	}
+
 	void drawUi() {
+		ZoneScoped;
+
 		ImGui::DockSpaceOverViewport();
 
 		if (ImGui::BeginMainMenuBar()) {
 			if (ImGui::BeginMenu("File")) {
-				if (ImGui::MenuItem("Load", nullptr, nullptr)) {
-					loadScene("scene.lua");
-				}
+				if (ImGui::MenuItem("New Scene", "Ctrl+N", nullptr))
+					fileNewScene();
+				if (ImGui::MenuItem("Open Scene", "Ctrl+O", nullptr))
+					openSceneDialogOption();
 
 				ImGui::Separator();
-				if (ImGui::MenuItem("Quit", "Alt+F4", nullptr))
+
+				if (ImGui::MenuItem("Exit", "Alt+F4", nullptr))
 					mRunning = false;
 
 				ImGui::EndMenu();
@@ -878,14 +978,8 @@ struct Engine final {
 			}
 
 			if (ImGui::BeginMenu("Entity")) {
-				if (ImGui::MenuItem("Create empty", nullptr, nullptr)) {
-					entt::entity entity = mRegistry.create();
-					mRegistry.emplace<GameObjectComponent>(entity);
-				}
-
-				if (ImGui::MenuItem("Clear All", nullptr, nullptr)) {
-					mRegistry.clear();
-				}
+				if (ImGui::MenuItem("Create Empty", "Ctrl+Shift+N", nullptr))
+					fileEntityCreateEmpty();
 
 				ImGui::EndMenu();
 			}
@@ -951,12 +1045,16 @@ struct Engine final {
 		drawGuiResourceManager();
 		drawGuiHierarchy();
 		drawGuiProperties();
+		audioExperiment();
 
 		if (mViews.imguiDemoWindow)
 			ImGui::ShowDemoWindow(&mViews.imguiDemoWindow);
 	}
 
 	void update() {
+		ZoneScoped;
+		TracyGpuZone(TracyFunction);
+
 		drawUi();
 
 		if (mViews.viewport) {
@@ -990,9 +1088,12 @@ struct Engine final {
 							.label =  "framebuffer viewport depth"
 						}};
 
-						mFramebuffer = hyperengine::Framebuffer::CreateInfo();
-						mFramebuffer.texture2D(GL_COLOR_ATTACHMENT0, mFramebufferColor);
-						mFramebuffer.renderbuffer(GL_DEPTH_ATTACHMENT, mFramebufferDepth);
+						std::array<hyperengine::Framebuffer::Attachment, 2> attachments{
+							hyperengine::Framebuffer::Attachment(GL_COLOR_ATTACHMENT0, std::ref(mFramebufferColor)),
+							hyperengine::Framebuffer::Attachment(GL_DEPTH_ATTACHMENT, std::ref(mFramebufferDepth)),
+						};
+
+						mFramebuffer = {{ .attachments = attachments }};
 					}
 
 					mFramebuffer.bind();
@@ -1014,8 +1115,8 @@ struct Engine final {
 							ImGui::Image((void*)(uintptr_t)mFramebufferColor.handle(), ImGui::GetContentRegionAvail(), { 0, 1 }, { 1, 0 });
 
 							// Draw transformation widget
-							if (selected != entt::null) {
-								GameObjectComponent& gameObject = mRegistry.get<GameObjectComponent>(selected);
+							if (mSelected != entt::null) {
+								GameObjectComponent& gameObject = mRegistry.get<GameObjectComponent>(mSelected);
 								glm::mat4 matrix = gameObject.transform.get();
 
 								ImGuizmo::SetDrawlist();
@@ -1123,7 +1224,7 @@ struct Engine final {
 	hyperengine::AudioEngine mAudioEngine;
 	entt::registry mRegistry;
 	ResourceManager mResourceManager;
-	entt::entity selected = entt::null;
+	entt::entity mSelected = entt::null;
 
 	GLuint mEngineUniformBuffer = 0;
 	UniformEngineData mUniformEngineData;
@@ -1148,8 +1249,11 @@ struct Engine final {
 };
 
 int main(int argc, char* argv[]) {
+	spdlog::set_level(spdlog::level::trace);
+	TracySetProgramName("HyperEngine");
 	hyperengine::setupRenderDoc(true);
 	Engine engine;
 	engine.run();
+	spdlog::shutdown();
     return 0;
 }

@@ -1,7 +1,7 @@
 #include "he_shader.hpp"
 
 #include <regex>
-#include <iostream>
+#include <spdlog/spdlog.h>
 #include <debug_trap.h>
 #include <glm/gtc/type_ptr.hpp>
 
@@ -89,8 +89,8 @@ namespace hyperengine {
 		}
 
 		if (!mErrors.empty()) {
-			for(auto const& error : mErrors)
-				std::cerr << error << '\n';
+			for (auto const& error : mErrors)
+				spdlog::error("{}", error);
 		}
 
 		GLint state;
@@ -134,8 +134,6 @@ namespace hyperengine {
 						++opaqueAssignment;
 					}
 				}
-
-				
 			}
 		}
 
@@ -188,9 +186,6 @@ namespace hyperengine {
 						mMaterialInfo[std::string(uniformName.get(), length)] = { .location = 0, .type = UniformType(type), .offset = offset, .blockIndex = -1 };
 					}
 				}
-
-				
-				
 			}
 		}
 

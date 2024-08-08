@@ -1,5 +1,7 @@
 #include "he_util.hpp"
 
+#include <random>
+
 namespace hyperengine {
 	size_t split(std::string const& txt, std::vector<std::string>& strs, char ch) {
 		size_t pos = txt.find(ch);
@@ -79,5 +81,15 @@ namespace hyperengine {
 		}
 
 		return result;
+	}
+
+	namespace {
+		std::random_device gRandomDevice;
+		std::mt19937_64 gEngine(gRandomDevice());
+		std::uniform_int_distribution<uint64_t> gUniformDistribution;
+	}
+
+	Uuid Uuid::generate() {
+		return gUniformDistribution(gEngine);
 	}
 }

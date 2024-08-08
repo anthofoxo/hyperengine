@@ -2,7 +2,7 @@ project "hyperengine"
 debugdir "../working"
 kind "ConsoleApp"
 
-defines "GLFW_INCLUDE_NONE"
+defines { "GLFW_INCLUDE_NONE", "TRACY_ENABLE" }
 
 files {
     "%{prj.location}/**.cpp",
@@ -26,9 +26,11 @@ includedirs {
 	"%{wks.location}/vendor/assimp/include",
     "%{wks.location}/vendor/entt/src",
     "%{wks.location}/vendor/lua/src",
+    "%{wks.location}/vendor/tracy/public",
+    "%{wks.location}/vendor/spdlog/include",
 }
 
-links { "glfw", "glad", "imgui", "imguizmo", "assimp", "lua" }
+links { "glfw", "glad", "imgui", "imguizmo", "assimp", "lua", "tracy" }
 
 filter "system:windows"
 files "%{prj.location}/*.rc"

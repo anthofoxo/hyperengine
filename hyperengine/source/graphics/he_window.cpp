@@ -1,19 +1,23 @@
 #include "he_window.hpp"
 
+#include <tracy/Tracy.hpp>
+
 #include "he_platform.hpp"
 #include <cstdint>
-#include <cstdio>
+#include <spdlog/spdlog.h>
 
 namespace hyperengine {
 	namespace {
 		uint_fast16_t gWindowCount = 0;
 
 		void errorCallback(int error, char const* description) {
-			fprintf(stderr, "GLFW Error %d: %s\n", error, description);
+			spdlog::error("GLFW Error {}: {}", error, description);
 		}
 	}
 
 	Window::Window(CreateInfo const& info) {
+		ZoneScoped;
+
 		if (!gWindowCount) {
 			glfwSetErrorCallback(&errorCallback);
 
@@ -58,6 +62,7 @@ namespace hyperengine {
 	}
 
 	void Window::swapBuffers() {
+		ZoneScoped;
 		glfwSwapBuffers(mHandle);
 	}
 }

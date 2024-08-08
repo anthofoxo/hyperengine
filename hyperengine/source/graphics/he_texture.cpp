@@ -30,8 +30,8 @@ namespace hyperengine {
 		}
 		else {
 			// save state
-			GLint param;
-			glGetIntegerv(GL_TEXTURE_BINDING_2D, &param);
+			GLuint param;
+			glGetIntegerv(GL_TEXTURE_BINDING_2D, (GLint*)&param);
 
 			glGenTextures(1, &mHandle);
 			glBindTexture(GL_TEXTURE_2D, mHandle);
@@ -49,7 +49,7 @@ namespace hyperengine {
 				glTexImage2D(GL_TEXTURE_2D, 0, pixelFormatToInternalFormat(info.format), info.width, info.height, 0, pixelFormatToFormat(info.format), pixelFormatToType(info.format), nullptr);
 
 			// restore state
-			glBindTexture(GL_TEXTURE_2D, static_cast<GLuint>(param));
+			glBindTexture(GL_TEXTURE_2D, param);
 		}
 
 		if (GLAD_GL_KHR_debug && !info.label.empty())
@@ -78,8 +78,8 @@ namespace hyperengine {
 		}
 		else {
 			// save state
-			GLint param;
-			glGetIntegerv(GL_TEXTURE_BINDING_2D, &param);
+			GLuint param;
+			glGetIntegerv(GL_TEXTURE_BINDING_2D, (GLint*)&param);
 
 			glBindTexture(GL_TEXTURE_2D, mHandle);
 			glTexSubImage2D(GL_TEXTURE_2D, 0, info.xoffset, info.yoffset, info.width, info.height, pixelFormatToFormat(info.format), pixelFormatToType(info.format), info.pixels);
@@ -88,7 +88,7 @@ namespace hyperengine {
 				glGenerateMipmap(GL_TEXTURE_2D);
 
 			// restore state
-			glBindTexture(GL_TEXTURE_2D, static_cast<GLuint>(param));
+			glBindTexture(GL_TEXTURE_2D, param);
 		}
 	}
 
