@@ -65,7 +65,6 @@ local objects = {
     mesh    = "fern.obj",
     textures = { tAlbedo = "fern.png" },
     shader  = "shaders/cutout.glsl",
-    material = { uCutoff = 0.5 }
   },
 }
 
@@ -79,7 +78,6 @@ for x=-3,3 do
         mesh    = "pine.obj",
         textures = { tAlbedo = "pine.png" },
         shader  = "shaders/cutout.glsl",
-        material = { uCutoff = 0.5 }
       })
     end
   end

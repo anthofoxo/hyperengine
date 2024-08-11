@@ -1,20 +1,7 @@
-// https://github.com/TheRealMJP/BakingLab/blob/master/BakingLab/ACES.hlsl
-layout(std140) uniform EngineData {
-    mat4 gProjection;
-    mat4 gView;
-    mat4 gLightMat;
-    vec3 gSkyColor;
-    float gFarPlane;
-    vec3 gSunDirection;
-    vec3 gSunColor;
-};
-float saturate(float value) {
-    return clamp(value, 0.0, 1.0);
-}
+#inject
+#include "common.glsl"
 
-vec3 saturate(vec3 value) {
-    return clamp(value, 0.0, 1.0);
-}
+// https://github.com/TheRealMJP/BakingLab/blob/master/BakingLab/ACES.hlsl
 
 VARYING(vec2, vUv);
 OUTPUT(vec4, oColor, 0);

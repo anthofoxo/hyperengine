@@ -1,12 +1,5 @@
-layout(std140) uniform EngineData {
-    mat4 gProjection;
-    mat4 gView;
-    mat4 gLightMat;
-    vec3 gSkyColor;
-    float gFarPlane;
-    vec3 gSunDirection;
-    vec3 gSunColor;
-};
+#inject
+#include "common.glsl"
 
 @edithint uColor = color
 uniform Material {
@@ -37,7 +30,7 @@ void main(void) {
     vec4 viewSpace = gView * worldSpace;
     gl_Position = gProjection * viewSpace;
     vTexCoord = iTexCoord;
-    vNormal = transpose(inverse(mat3(uTransform))) * iNormal;
+    vNormal = nonUniformScale(uTransform, iNormal);
     vToCamera = (inverse(gView) * vec4(0.0, 0.0, 0.0, 1.0)).xyz - worldSpace.xyz;
     vDistance = length(viewSpace.xyz);
     vFragPosLightSpace = gLightMat * worldSpace;
@@ -45,32 +38,6 @@ void main(void) {
 #endif
 
 #ifdef FRAG
-float ShadowCalculation(vec4 fragPosLightSpace) {
-    vec3 projCoords = fragPosLightSpace.xyz / fragPosLightSpace.w;
-    projCoords = projCoords * 0.5 + 0.5;
-    
-     if(projCoords.z > 1.0)
-        return 0.0;
-    
-    vec2 texelSize = 1.0 / textureSize(tShadowMap, 0);
-   
-    
-    float currentDepth = projCoords.z;
-    float bias = max(0.003 * (1.0 - dot(vNormal, gSunDirection)), 0.0);
-    
-    float shadow = 0.0;
-   
-    
-    for(int y = -1; y <= 1; ++y) {
-        for(int x = -1; x <= 1; ++x) {
-            float pcfDepth = texture(tShadowMap, projCoords.xy + vec2(x, y) * texelSize).r;
-            shadow += currentDepth - bias > pcfDepth  ? 1.0 : 0.0;
-        }
-    }
-    
-    return shadow / 9.0;
-}
-
 void main(void) {
     oColor = texture(tAlbedo, vTexCoord);
     oColor.rgb *= pow(oColor.rgb, vec3(kGamma));
@@ -79,7 +46,7 @@ void main(void) {
     vec3 unitNormal = normalize(vNormal);
     vec3 unitToCamera = normalize(vToCamera);
     
-    float shadow = 1.0 - ShadowCalculation(vFragPosLightSpace);
+    float shadow = 1.0 - _shadowCalculation(tShadowMap, vFragPosLightSpace, unitNormal, -gSunDirection);
     
     oColor.rgb *= max(gSunColor * dot(unitNormal, -gSunDirection) * shadow, 0.2);
     vec3 reflectedLight = reflect(gSunDirection, unitNormal);

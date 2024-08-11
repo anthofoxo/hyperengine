@@ -467,29 +467,18 @@ bool drawComponentEditGui(entt::registry& registry, entt::entity entity, char co
 	return true;
 }
 
-std::vector<glm::vec4> getFrustumCornersWorldSpace(const glm::mat4& proj, const glm::mat4& view)
-{
-	const auto inv = glm::inverse(proj * view);
-
-	std::vector<glm::vec4> frustumCorners;
+static std::array<glm::vec3, 8> getSystemSpaceNdcExtremes(glm::mat4 const& matrix) {
+	auto const inv = glm::inverse(matrix);
+	std::array<glm::vec3, 8> corners;
+	
 	for (unsigned int x = 0; x < 2; ++x)
-	{
 		for (unsigned int y = 0; y < 2; ++y)
-		{
-			for (unsigned int z = 0; z < 2; ++z)
-			{
-				const glm::vec4 pt =
-					inv * glm::vec4(
-						2.0f * x - 1.0f,
-						2.0f * y - 1.0f,
-						2.0f * z - 1.0f,
-						1.0f);
-				frustumCorners.push_back(pt / pt.w);
+			for (unsigned int z = 0; z < 2; ++z) {
+				glm::vec4 const pt = inv * glm::vec4(2.0f * x - 1.0f, 2.0f * y - 1.0f, 2.0f * z - 1.0f, 1.0f);
+				corners[z * 4 + y * 2 + x] = glm::vec3(pt) / pt.w;
 			}
-		}
-	}
 
-	return frustumCorners;
+	return corners;
 }
 
 struct Engine final {
@@ -1161,9 +1150,8 @@ struct Engine final {
 			ImGui::ShowDemoWindow(&mViews.imguiDemoWindow);
 	}
 
-	float mShadowMapOffset = 20.0f;
+	float mShadowMapOffset = 10.0f;
 	float mShadowMapDistance = 80.0f;
-	float zMult = 10.0f;
 
 	void update() {
 		ZoneScoped;
@@ -1175,7 +1163,6 @@ struct Engine final {
 			ImGui::Image((void*)(uintptr_t)mFramebufferShadowDepth.handle(), { 256, 256 }, { 0, 1 }, { 1, 0 });
 			ImGui::DragFloat("ShadowMap Offset", &mShadowMapOffset);
 			ImGui::DragFloat("ShadowMap Distance", &mShadowMapDistance);
-			ImGui::DragFloat("ZMul", &zMult);
 
 			if(ImGui::DragInt("ShadowMap Size", &mShadowMapSize, 1.0f, 32, 16384))
 				genShadowmap();
@@ -1244,7 +1231,7 @@ struct Engine final {
 					CameraComponent* cameraCamera = nullptr;
 
 					// In absence of a sun, assert a white directional light pointing directly down
-					glm::vec3 sunDirection = glm::vec3(0.0f, -1.0f, 0.0f);
+					glm::vec3 sunDirection = glm::normalize(glm::vec3(0.0f, -1.0f, 0.01f));
 					glm::vec3 sunColor = glm::vec3(1.0f) * 3.0f;
 
 					{
@@ -1324,10 +1311,9 @@ struct Engine final {
 							{
 
 								auto lightLimied = glm::perspective(glm::radians(cameraCamera->fov), static_cast<float>(mViewportSize.x) / static_cast<float>(mViewportSize.y), cameraCamera->clippingPlanes.x, mShadowMapDistance);
-								auto corners = getFrustumCornersWorldSpace(lightLimied, glm::inverse(cameraTransform->get()));
+								auto corners = getSystemSpaceNdcExtremes(lightLimied * glm::inverse(cameraTransform->get()));
 								glm::vec3 center = glm::vec3(0, 0, 0);
-								for (const auto& v : corners)
-								{
+								for (const auto& v : corners) {
 									center += glm::vec3(v);
 								}
 								center /= (float)corners.size();
@@ -1340,9 +1326,8 @@ struct Engine final {
 								float maxY = std::numeric_limits<float>::lowest();
 								float minZ = std::numeric_limits<float>::max();
 								float maxZ = std::numeric_limits<float>::lowest();
-								for (const auto& v : corners)
-								{
-									const auto trf = lightView * v;
+								for (const auto& v : corners) {
+									const auto trf = lightView * glm::vec4(v, 1.0f);
 									minX = std::min(minX, trf.x);
 									maxX = std::max(maxX, trf.x);
 									minY = std::min(minY, trf.y);
@@ -1350,13 +1335,6 @@ struct Engine final {
 									minZ = std::min(minZ, trf.z);
 									maxZ = std::max(maxZ, trf.z);
 								}
-
-								// Tune this parameter according to the scene
-								
-								if (minZ < 0) minZ *= zMult;
-								else minZ /= zMult;
-								if (maxZ < 0) maxZ /= zMult;
-								else maxZ *= zMult;
 								
 								minZ -= mShadowMapOffset;
 
@@ -1386,7 +1364,6 @@ struct Engine final {
 
 									// Assign all needed textures
 									for (auto const& [k, v] : meshRenderer.shader->opaqueAssignments()) {
-
 										if (meshRenderer.textures[v])
 											meshRenderer.textures[v]->bind(v);
 										else

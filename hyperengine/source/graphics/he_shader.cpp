@@ -5,23 +5,11 @@
 #include <debug_trap.h>
 #include <glm/gtc/type_ptr.hpp>
 
+#define STB_INCLUDE_IMPLEMENTATION
+#define STB_INCLUDE_LINE_GLSL
+#include <stb_include.h>
+
 namespace {
-	std::string_view gVertHeader = R"(#version 330 core
-#define VERT
-#define INPUT(type, name, index) layout(location = index) in type name
-#define OUTPUT(type, name, index)
-#define VARYING(type, name) out type name
-#line 1
-)";
-
-	std::string_view gFragHeader = R"(#version 330 core
-#define FRAG
-#define INPUT(type, name, index)
-#define OUTPUT(type, name, index) layout(location = index) out type name
-#define VARYING(type, name) in type name
-#line 1
-)";
-
 	GLuint makeShader(GLenum type, GLchar const* string, GLint length, std::vector<std::string>& errors) {
 		GLuint shader = glCreateShader(type);
 		glShaderSource(shader, 1, &string, &length);
@@ -61,13 +49,15 @@ namespace hyperengine {
 			source = std::regex_replace(source, regex, "// ENGINE PRAGMA APPLIED // $&");
 		}
 
-		// Theres probably a better way to do this, look into it sometime plz
-		std::string vertSource = std::string(gVertHeader) + source;
-		std::string fragSource = std::string(gFragHeader) + source;
-		//
+		char error[256];
+		char* vertSource = stb_include_string(source.data(), (char*)"#version 330 core\n#define VERT", (char*)"./shaders", nullptr, error);
+		char* fragSource = stb_include_string(source.data(), (char*)"#version 330 core\n#define FRAG", (char*)"./shaders", nullptr, error);
 
-		GLuint vert = makeShader(GL_VERTEX_SHADER, vertSource.data(), static_cast<int>(vertSource.size()), mErrors);
-		GLuint frag = makeShader(GL_FRAGMENT_SHADER, fragSource.data(), static_cast<int>(fragSource.size()), mErrors);
+		GLuint vert = makeShader(GL_VERTEX_SHADER, vertSource, static_cast<int>(strlen(vertSource)), mErrors);
+		GLuint frag = makeShader(GL_FRAGMENT_SHADER, fragSource, static_cast<int>(strlen(fragSource)), mErrors);
+
+		free(vertSource);
+		free(fragSource);
 
 		mHandle = glCreateProgram();
 		glAttachShader(mHandle, vert);

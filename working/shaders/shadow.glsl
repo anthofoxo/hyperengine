@@ -1,17 +1,10 @@
+#inject
+#include "common.glsl"
+
 @property cull = 0
 
-layout(std140) uniform EngineData {
-    mat4 gProjection;
-    mat4 gView;
-    mat4 gLightMat;
-    vec3 gSkyColor;
-    float gFarPlane;
-    vec3 gSunDirection;
-    vec3 gSunColor;
-};
-
 INPUT(vec3, iPosition, 0);
-INPUT(vec3, iNormal, 1);
+// INPUT(vec3, iNormal, 1);
 INPUT(vec2, iTexCoord, 2);
 VARYING(vec2, vTexCoord);
 
@@ -20,9 +13,7 @@ uniform sampler2D tAlbedo;
 
 #ifdef VERT
 void main(void) {
-    vec4 worldSpace = uTransform * vec4(iPosition, 1.0);
-    vec4 viewSpace = gView * worldSpace;
-    gl_Position = gProjection * viewSpace;
+    gl_Position = gProjection * gView * uTransform * vec4(iPosition, 1.0);
     vTexCoord = iTexCoord;
 }
 #endif
