@@ -20,6 +20,7 @@ uniform mat4 uTransform;
 uniform sampler2D tAlbedo;
 uniform sampler2D tSpecular;
 
+@edithint tShadowMap = hidden
 uniform sampler2D tShadowMap;
 
 const float kGamma = 2.2;

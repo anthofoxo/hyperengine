@@ -7,6 +7,21 @@
 
 namespace hyperengine {
 	Framebuffer::Framebuffer(CreateInfo const& info) {
+		// Count attachments
+		std::vector<GLenum> colorAttachments;
+		colorAttachments.reserve(8);
+
+		for (auto const& texrb : info.attachments) {
+			auto attachment = texrb.attachment;
+
+			if (attachment >= GL_COLOR_ATTACHMENT0 && attachment <= GL_COLOR_ATTACHMENT31)
+				colorAttachments.push_back(attachment);
+		}
+
+		// If no color attachment, specifically use none
+		if (colorAttachments.empty())
+			colorAttachments.push_back(GL_NONE);
+
 		if (GLAD_GL_ARB_direct_state_access) {
 			glCreateFramebuffers(1, &mHandle);
 
@@ -18,6 +33,8 @@ namespace hyperengine {
 					[this, attachment](hyperengine::Renderbuffer& v) { glNamedFramebufferRenderbuffer(mHandle, attachment, GL_RENDERBUFFER, v.handle()); },
 				}, texrb.source);
 			}
+
+			glNamedFramebufferDrawBuffers(mHandle, colorAttachments.size(), colorAttachments.data());
 
 			auto status = glCheckNamedFramebufferStatus(mHandle, GL_FRAMEBUFFER);
 			if (status != GL_FRAMEBUFFER_COMPLETE) {
@@ -39,6 +56,8 @@ namespace hyperengine {
 					[attachment](hyperengine::Renderbuffer& v) { glFramebufferRenderbuffer(GL_FRAMEBUFFER, attachment, GL_RENDERBUFFER, v.handle()); },
 				}, texrb.source);
 			}
+
+			glDrawBuffers(colorAttachments.size(), colorAttachments.data());
 
 			auto status = glCheckFramebufferStatus(GL_FRAMEBUFFER);
 			if (status != GL_FRAMEBUFFER_COMPLETE) {

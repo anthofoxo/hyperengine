@@ -18,6 +18,7 @@ uniform sampler2D tAlbedo;
 uniform sampler2D tSpecular;
 uniform sampler2D tNormal;
 
+@edithint tShadowMap = hidden
 uniform sampler2D tShadowMap;
 
 const float kGamma = 2.2;

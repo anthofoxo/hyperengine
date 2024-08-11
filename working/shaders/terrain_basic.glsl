@@ -24,6 +24,7 @@ uniform sampler2D tAlbedo2;
 uniform sampler2D tAlbedo3;
 uniform sampler2D tBlendmap;
 
+@edithint tShadowMap = hidden
 uniform sampler2D tShadowMap;
 
 const float kGamma = 2.2;
@@ -70,7 +71,16 @@ void main(void) {
     vec3 unitNormal = normalize(vNormal);
     vec3 unitToCamera = normalize(vToCamera);
     
-    float shadow = 1.0 - _shadowCalculation(tShadowMap, vFragPosLightSpace, unitNormal, -gSunDirection);
+    float dist = length(vPosition);
+
+    
+    float shadow =  _shadowCalculation(tShadowMap, vFragPosLightSpace, unitNormal, -gSunDirection);
+    float transStart = 50.0 * 0.9;
+    float transLen = 50.0 - transStart;
+    shadow *= 1.0 - saturate((dist - transStart) / transLen);
+    shadow = 1.0 - shadow;
+    
+    
     oColor.rgb *= max(gSunColor * dot(unitNormal, -gSunDirection) * shadow, 0.2);
     oColor.rgb = mix(oColor.rgb, gSkyColor, smoothstep(gFarPlane * 0.6, gFarPlane, length(vPosition)));
 }

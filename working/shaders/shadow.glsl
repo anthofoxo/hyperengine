@@ -13,7 +13,7 @@ uniform sampler2D tAlbedo;
 
 #ifdef VERT
 void main(void) {
-    gl_Position = gProjection * gView * uTransform * vec4(iPosition, 1.0);
+    gl_Position = gLightMat * uTransform * vec4(iPosition, 1.0);
     vTexCoord = iTexCoord;
 }
 #endif

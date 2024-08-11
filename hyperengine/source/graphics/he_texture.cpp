@@ -1,32 +1,29 @@
 #include "he_texture.hpp"
 
 #include "he_gl.hpp"
-#include <glm/glm.hpp>
+#include <glm/gtc/type_ptr.hpp>
 
 namespace hyperengine {
 	Texture::Texture(CreateInfo const& info) {
+		using enum FilterMode;
 		int maxLevel = 0;
 		float maxAnisotropy = 0.0f;
+		
+		bool const useAnisotropy = info.minFilter == kNearestMipNearest || info.minFilter == kLinearMipNearest || info.minFilter == kNearestMipLinear || info.minFilter == kLinearMipLinear;
 
-		if (info.minFilter == GL_NEAREST_MIPMAP_NEAREST ||
-			info.minFilter == GL_LINEAR_MIPMAP_NEAREST ||
-			info.minFilter == GL_NEAREST_MIPMAP_LINEAR ||
-			info.minFilter == GL_LINEAR_MIPMAP_LINEAR
-			) {
+		if (useAnisotropy) {
 			maxLevel = static_cast<int>(glm::floor(glm::log2(static_cast<float>(glm::max(info.width, info.height)))));
-			maxAnisotropy = glm::min(hyperengine::glContextInfo().maxAnisotropy, 8.0f); // Use 8x anisotropy max
+			maxAnisotropy = glm::min(hyperengine::glContextInfo().maxAnisotropy, info.anisotropy);
 		}
-
-		float borderColor[] = { 1.0f, 1.0f, 1.0f, 1.0f };
 
 		if (GLAD_GL_ARB_direct_state_access) {
 			glCreateTextures(GL_TEXTURE_2D, 1, &mHandle);
-			glTextureParameteri(mHandle, GL_TEXTURE_MIN_FILTER, info.minFilter);
-			glTextureParameteri(mHandle, GL_TEXTURE_MAG_FILTER, info.magFilter);
-			glTextureParameteri(mHandle, GL_TEXTURE_WRAP_S, info.wrap);
-			glTextureParameteri(mHandle, GL_TEXTURE_WRAP_T, info.wrap);
+			glTextureParameteri(mHandle, GL_TEXTURE_MIN_FILTER, static_cast<GLenum>(info.minFilter));
+			glTextureParameteri(mHandle, GL_TEXTURE_MAG_FILTER, static_cast<GLenum>(info.magFilter));
+			glTextureParameteri(mHandle, GL_TEXTURE_WRAP_S, static_cast<GLenum>(info.wrap));
+			glTextureParameteri(mHandle, GL_TEXTURE_WRAP_T, static_cast<GLenum>(info.wrap));
 			glTextureParameteri(mHandle, GL_TEXTURE_MAX_LEVEL, maxLevel);
-			glTextureParameterfv(mHandle, GL_TEXTURE_BORDER_COLOR, borderColor);
+			glTextureParameterfv(mHandle, GL_TEXTURE_BORDER_COLOR, glm::value_ptr(info.border));
 			if(maxAnisotropy > 0.0f)
 				glTextureParameterf(mHandle, GL_TEXTURE_MAX_ANISOTROPY, maxAnisotropy);
 			glTextureStorage2D(mHandle, maxLevel + 1, pixelFormatToInternalFormat(info.format), info.width, info.height);
@@ -38,12 +35,12 @@ namespace hyperengine {
 
 			glGenTextures(1, &mHandle);
 			glBindTexture(GL_TEXTURE_2D, mHandle);
-			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, info.minFilter);
-			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, info.magFilter);
-			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, info.wrap);
-			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, info.wrap);
+			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, static_cast<GLenum>(info.minFilter));
+			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, static_cast<GLenum>(info.magFilter));
+			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, static_cast<GLenum>(info.wrap));
+			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, static_cast<GLenum>(info.wrap));
 			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, maxLevel);
-			glTexParameterfv(GL_TEXTURE_2D, GL_TEXTURE_BORDER_COLOR, borderColor);
+			glTexParameterfv(GL_TEXTURE_2D, GL_TEXTURE_BORDER_COLOR, glm::value_ptr(info.border));
 			if (maxAnisotropy > 0.0f)
 				glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MAX_ANISOTROPY, maxAnisotropy);
 

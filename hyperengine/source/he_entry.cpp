@@ -169,7 +169,8 @@ auto glslShaderDef() {
 		"dvec2", "dvec3", "dvec4", "mat2", "mat3", "mat4",
 		"mat2x2", "mat2x3", "mat2x4", "mat3x2", "mat3x3", "mat3x4",
 		"mat4x2", "mat4x3", "mat4x4",
-		"sampler2D", "in", "out", "const", "uniform", "layout", "std140"
+		"sampler2D", "in", "out", "const", "uniform", "layout", "std140",
+		"if", "else", "return"
 	};
 	for (auto& k : keywords)
 		langDef.mKeywords.insert(k);
@@ -483,16 +484,18 @@ static std::array<glm::vec3, 8> getSystemSpaceNdcExtremes(glm::mat4 const& matri
 
 struct Engine final {
 	void createInternalTextures() {
+		using enum hyperengine::Texture::WrapMode;
+		using enum hyperengine::Texture::FilterMode;
 		{
 			unsigned char pixels[] = { 0, 0, 0, 255 };
-			hyperengine::Texture tex = { {.width = 1, .height = 1, .format = hyperengine::PixelFormat::kRgba8, .minFilter = GL_NEAREST, .magFilter = GL_NEAREST, .wrap = GL_CLAMP_TO_EDGE, .label = "internal black", .origin = kInternalTextureBlackName } };
+			hyperengine::Texture tex = { {.width = 1, .height = 1, .format = hyperengine::PixelFormat::kRgba8, .minFilter = kNearest, .magFilter = kNearest, .wrap = kClampEdge, .label = kInternalTextureBlackName, .origin = kInternalTextureBlackName } };
 			tex.upload({ .xoffset = 0, .yoffset = 0, .width = 1, .height = 1, .format = hyperengine::PixelFormat::kRgba8, .pixels = pixels });
 			mInternalTextureBlack = std::make_shared<hyperengine::Texture>(std::move(tex));
 			mResourceManager.mTextures[std::string(kInternalTextureBlackName)] = mInternalTextureBlack;
 		}
 		{
 			unsigned char pixels[] = { 255, 255, 255, 255 };
-			hyperengine::Texture tex = { {.width = 1, .height = 1, .format = hyperengine::PixelFormat::kRgba8, .minFilter = GL_NEAREST, .magFilter = GL_NEAREST, .wrap = GL_CLAMP_TO_EDGE, .label = "internal white", .origin = kInternalTextureWhiteName } };
+			hyperengine::Texture tex = { {.width = 1, .height = 1, .format = hyperengine::PixelFormat::kRgba8, .minFilter = kNearest, .magFilter = kNearest, .wrap = kClampEdge, .label = kInternalTextureWhiteName, .origin = kInternalTextureWhiteName } };
 			tex.upload({ .xoffset = 0, .yoffset = 0, .width = 1, .height = 1, .format = hyperengine::PixelFormat::kRgba8, .pixels = pixels });
 			mInternalTextureWhite = std::make_shared<hyperengine::Texture>(std::move(tex));
 			mResourceManager.mTextures[std::string(kInternalTextureWhiteName)] = mInternalTextureWhite;
@@ -508,7 +511,7 @@ struct Engine final {
 					pixels.get()[x * 4 + y * 256 * 4 + 3] = 255;
 				}
 
-			hyperengine::Texture tex = { {.width = 256, .height = 256, .format = hyperengine::PixelFormat::kRgba8, .minFilter = GL_LINEAR, .magFilter = GL_LINEAR, .wrap = GL_REPEAT, .label = "internal uv", .origin = kInternalTextureUvName } };
+			hyperengine::Texture tex = { {.width = 256, .height = 256, .format = hyperengine::PixelFormat::kRgba8, .minFilter = kLinear, .magFilter = kLinear, .wrap = kRepeat, .label = kInternalTextureUvName, .origin = kInternalTextureUvName } };
 			tex.upload({ .xoffset = 0, .yoffset = 0, .width = 256, .height = 256, .format = hyperengine::PixelFormat::kRgba8, .pixels = pixels.get()});
 			mInternalTextureUv = std::make_shared<hyperengine::Texture>(std::move(tex));
 			mResourceManager.mTextures[std::string(kInternalTextureUvName)] = mInternalTextureUv;
@@ -539,13 +542,15 @@ struct Engine final {
 		});
 
 		glfwSetKeyCallback(mWindow.handle(), [](GLFWwindow* window, int key, int scancode, int action, int mods) {
-			if (action == GLFW_PRESS && key == GLFW_KEY_O && mods == GLFW_MOD_CONTROL)
+			if (action != GLFW_PRESS) return;
+
+			if (key == GLFW_KEY_O && mods == GLFW_MOD_CONTROL)
 				static_cast<Engine*>(glfwGetWindowUserPointer(window))->openSceneDialogOption();
 
-			if (action == GLFW_PRESS && key == GLFW_KEY_N && mods == GLFW_MOD_CONTROL)
+			if (key == GLFW_KEY_N && mods == GLFW_MOD_CONTROL)
 				static_cast<Engine*>(glfwGetWindowUserPointer(window))->fileNewScene();
 
-			if (action == GLFW_PRESS && key == GLFW_KEY_N && mods == (GLFW_MOD_CONTROL | GLFW_MOD_SHIFT))
+			if (key == GLFW_KEY_N && mods == (GLFW_MOD_CONTROL | GLFW_MOD_SHIFT))
 				static_cast<Engine*>(glfwGetWindowUserPointer(window))->fileEntityCreateEmpty();
 		});
 
@@ -569,27 +574,24 @@ struct Engine final {
 	}
 
 	void genShadowmap() {
-		mFramebufferShadowDepth = { {
+		using enum hyperengine::Texture::WrapMode;
+		using enum hyperengine::Texture::FilterMode;
+
+		mFramebufferShadowDepth = {{
 				.width = mShadowMapSize,
 				.height = mShadowMapSize,
 				.format = hyperengine::PixelFormat::kD24,
-				.minFilter = GL_NEAREST,
-				.magFilter = GL_NEAREST,
-				.wrap = GL_CLAMP_TO_BORDER,
+				.minFilter = kNearest,
+				.magFilter = kNearest,
+				.wrap = kClampBorder,
 				.label = "shadow depth"
-			} };
-
-
+			}};
 
 		std::array<hyperengine::Framebuffer::Attachment, 1> attachments{
 			hyperengine::Framebuffer::Attachment(GL_DEPTH_ATTACHMENT, std::ref(mFramebufferShadowDepth)),
 		};
 
-		mFramebufferShadow = { {.attachments = attachments } };
-		mFramebufferShadow.bind();
-		glDrawBuffer(GL_NONE);
-		glReadBuffer(GL_NONE);
-		glBindFramebuffer(GL_FRAMEBUFFER, 0);
+		mFramebufferShadow = {{ .attachments = attachments }};
 	}
 
 	void run() {
@@ -738,6 +740,8 @@ struct Engine final {
 					// Present texture options
 					if (comp.shader) {
 						for (auto const& [k, v] : comp.shader->opaqueAssignments()) {
+							if (comp.shader->editHint(k) == "hidden") continue;
+
 							ImGui::PushID(v);
 
 							auto& texture = comp.textures[v];
@@ -857,7 +861,7 @@ struct Engine final {
 	}
 
 	void loadScene(char const* path) {
-		mRegistry.clear();
+		fileNewScene();
 
 
 		{
@@ -1150,9 +1154,6 @@ struct Engine final {
 			ImGui::ShowDemoWindow(&mViews.imguiDemoWindow);
 	}
 
-	float mShadowMapOffset = 10.0f;
-	float mShadowMapDistance = 80.0f;
-
 	void update() {
 		ZoneScoped;
 		TracyGpuZone(TracyFunction);
@@ -1181,15 +1182,18 @@ struct Engine final {
 
 					// Different sizes, gotta resize the viewport buffer
 					if (contentAvail != mViewportSize) {
+						using enum hyperengine::Texture::WrapMode;
+						using enum hyperengine::Texture::FilterMode;
+
 						mViewportSize = contentAvail;
 
 						mFramebufferColor = {{
 							.width = mViewportSize.x,
 							.height = mViewportSize.y,
 							.format = hyperengine::PixelFormat::kRgba32f,
-							.minFilter = GL_LINEAR,
-							.magFilter = GL_LINEAR,
-							.wrap = GL_CLAMP_TO_EDGE,
+							.minFilter = kLinear,
+							.magFilter = kLinear,
+							.wrap = kClampEdge,
 							.label = "framebuffer viewport color"
 						}};
 
@@ -1211,9 +1215,9 @@ struct Engine final {
 							.width = mViewportSize.x,
 							.height = mViewportSize.y,
 							.format = hyperengine::PixelFormat::kRgba8,
-							.minFilter = GL_LINEAR,
-							.magFilter = GL_LINEAR,
-							.wrap = GL_CLAMP_TO_EDGE,
+							.minFilter = kLinear,
+							.magFilter = kLinear,
+							.wrap = kClampEdge,
 							.label = "framebuffer post color"
 						}};
 
@@ -1299,10 +1303,6 @@ struct Engine final {
 								}
 							}
 
-							
-
-							
-
 							// Depth pass
 							mFramebufferShadow.bind();
 							glViewport(0, 0, mShadowMapSize, mShadowMapSize);
@@ -1316,33 +1316,30 @@ struct Engine final {
 								for (const auto& v : corners) {
 									center += glm::vec3(v);
 								}
-								center /= (float)corners.size();
+								center /= static_cast<float>(corners.size());
 
 								glm::mat4 lightView = glm::lookAt(-sunDirection + center, center, glm::vec3(0.0f, 1.0f, 0.0f));
 
-								float minX = std::numeric_limits<float>::max();
-								float maxX = std::numeric_limits<float>::lowest();
-								float minY = std::numeric_limits<float>::max();
-								float maxY = std::numeric_limits<float>::lowest();
-								float minZ = std::numeric_limits<float>::max();
-								float maxZ = std::numeric_limits<float>::lowest();
+								glm::vec3 min = glm::vec3(std::numeric_limits<float>::max());
+								glm::vec3 max = glm::vec3(std::numeric_limits<float>::lowest());
+
 								for (const auto& v : corners) {
 									const auto trf = lightView * glm::vec4(v, 1.0f);
-									minX = std::min(minX, trf.x);
-									maxX = std::max(maxX, trf.x);
-									minY = std::min(minY, trf.y);
-									maxY = std::max(maxY, trf.y);
-									minZ = std::min(minZ, trf.z);
-									maxZ = std::max(maxZ, trf.z);
+									min.x = glm::min(min.x, trf.x);
+									max.x = glm::max(max.x, trf.x);
+									min.y = glm::min(min.y, trf.y);
+									max.y = glm::max(max.y, trf.y);
+									min.z = glm::min(min.z, trf.z);
+									max.z = glm::max(max.z, trf.z);
 								}
 								
-								minZ -= mShadowMapOffset;
+								min.z -= mShadowMapOffset;
 
-								glm::mat4 lightProjection = glm::ortho(minX, maxX, minY, maxY, minZ, maxZ);
+								glm::mat4 lightProjection = glm::ortho(min.x, max.x, min.y, max.y, min.z, max.z);
 
 								// Update engine uniform data
-								mUniformEngineData.projection = lightProjection;
-								mUniformEngineData.view = lightView;
+								mUniformEngineData.projection = cameraProjection;
+								mUniformEngineData.view = glm::inverse(cameraTransform->get());
 								mUniformEngineData.lightmat = lightProjection * lightView;
 								mUniformEngineData.skyColor = mSkyColor;
 								mUniformEngineData.farPlane = cameraCamera->clippingPlanes[1];
@@ -1377,18 +1374,6 @@ struct Engine final {
 
 								glEnable(GL_CULL_FACE);
 							}
-
-							// Update engine uniform data
-							mUniformEngineData.projection = cameraProjection;
-							mUniformEngineData.view = glm::inverse(cameraTransform->get());
-							mUniformEngineData.skyColor = mSkyColor;
-							mUniformEngineData.farPlane = cameraCamera->clippingPlanes[1];
-							mUniformEngineData.sunDirection = sunDirection;
-							mUniformEngineData.sunColor = sunColor;
-							// Upload buffer
-							glBindBuffer(GL_UNIFORM_BUFFER, mEngineUniformBuffer);
-							glBufferSubData(GL_UNIFORM_BUFFER, 0, sizeof(decltype(mUniformEngineData)), &mUniformEngineData);
-							glBindBuffer(GL_UNIFORM_BUFFER, 0);
 
 							// Render scene
 							mFramebuffer.bind();
@@ -1461,6 +1446,8 @@ struct Engine final {
 
 	hyperengine::Window mWindow;
 
+	float mShadowMapOffset = 10.0f;
+	float mShadowMapDistance = 50.0f;
 	int mShadowMapSize = 2048;
 	hyperengine::Framebuffer mFramebufferShadow;
 	hyperengine::Texture mFramebufferShadowDepth;

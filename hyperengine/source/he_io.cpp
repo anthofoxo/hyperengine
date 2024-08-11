@@ -144,9 +144,9 @@ namespace hyperengine {
 				.width = x,
 				.height = y,
 				.format = hyperengine::PixelFormat::kRgba8,
-				.minFilter = GL_LINEAR_MIPMAP_LINEAR,
-				.magFilter = GL_LINEAR,
-				.wrap = GL_REPEAT,
+				.minFilter = hyperengine::Texture::FilterMode::kLinearMipLinear,
+				.magFilter = hyperengine::Texture::FilterMode::kLinear,
+				.wrap = hyperengine::Texture::WrapMode::kRepeat,
 				.label = filepath,
 				.origin = filepath
 			}};

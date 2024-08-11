@@ -15,6 +15,7 @@ OUTPUT(vec4, oColor, 0);
 uniform mat4 uTransform;
 uniform sampler2D tAlbedo;
 
+@edithint tShadowMap = hidden
 uniform sampler2D tShadowMap;
 
 const float kGamma = 2.2;
