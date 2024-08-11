@@ -47,8 +47,6 @@ namespace hyperengine {
 		// This occurs when frame capturing, if we're frame capturing, lets ignore this message
 		if (id == 0x20052 && hyperengine::rdoc::isFrameCapturing()) return;
 
-		spdlog::log(spdlog::level::trace, "{}", 20);
-
 		spdlog::level::level_enum level;
 
 		switch (severity) {
@@ -70,7 +68,6 @@ namespace hyperengine {
 		}
 
 		spdlog::log(level, "{}, {}, {}, {}: {}", glConstantToString(source), glConstantToString(type), glConstantToString(severity), id, message);
-
 
 		// hyperengine::breakpointIfDebugging();
 	}

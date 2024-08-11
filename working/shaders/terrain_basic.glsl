@@ -51,7 +51,7 @@ void main(void) {
     vec4 color2 = pow(textureNoTile(tAlbedo2, vTexCoord * uTiling.z), vec4(kGamma));
     vec4 color3 = pow(textureNoTile(tAlbedo3, vTexCoord * uTiling.w), vec4(kGamma));
 
-#ifdef USE_OLD_BLENDING
+#ifdef FAST
     oColor = vec4(color0.rgb * bias.x + color1.rgb * bias.y + color2.rgb * bias.z + color3.rgb * bias.w, 1.0);
 #else
     color0.a = dot(color0.rgb, vec3(0.299, 0.587, 0.114));
@@ -75,9 +75,10 @@ void main(void) {
 
     
     float shadow =  _shadowCalculation(tShadowMap, vFragPosLightSpace, unitNormal, -gSunDirection);
+    
     float transStart = 50.0 * 0.9;
     float transLen = 50.0 - transStart;
-    shadow *= 1.0 - saturate((dist - transStart) / transLen);
+    //shadow *= 1.0 - saturate((dist - transStart) / transLen);
     shadow = 1.0 - shadow;
     
     

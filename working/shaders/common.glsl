@@ -9,6 +9,9 @@
 #   define VARYING(type, name) in type name
 #endif
 
+// Uncomment to use faster but lower quality shaders in certain situaions
+// #define FAST
+
 layout(std140) uniform EngineData {
     mat4 gProjection;
     mat4 gView;
@@ -16,6 +19,7 @@ layout(std140) uniform EngineData {
     vec3 gSkyColor;
     float gFarPlane;
     vec3 gSunDirection;
+    float gTime;
     vec3 gSunColor;
 };
 
@@ -78,7 +82,11 @@ vec4 textureNoTile(sampler2D samp, in vec2 uv) {
 }
 #endif
 
+float random(vec2 st) {
+    return fract(sin(dot(st.xy, vec2(12.9898, 78.233))) * 43758.5453123);
+}
 
+#ifdef FRAG
 float _shadowCalculation(sampler2D samp, vec4 fragPosLightSpace, vec3 normal, vec3 sunDirection) {
     vec3 projCoords = fragPosLightSpace.xyz / fragPosLightSpace.w;
     projCoords = projCoords * 0.5 + 0.5;
@@ -86,17 +94,23 @@ float _shadowCalculation(sampler2D samp, vec4 fragPosLightSpace, vec3 normal, ve
      if(projCoords.z > 1.0)
         return 0.0;
     
-    vec2 texelSize = 1.0 / textureSize(samp, 0);
-    
     float currentDepth = projCoords.z;
     float bias = max(0.002 * (1.0 - dot(normal, -sunDirection)), 0.0);
+
+#ifdef FAST
+    float pcfDepth = texture(samp, projCoords.xy).r;
+    return currentDepth - bias > pcfDepth ? 1.0 : 0.0;
+#else
+    vec2 texelSize = 1.0 / textureSize(samp, 0);  
     float shadow = 0.0;
-    
+    vec2 offset = vec2(random((gl_FragCoord.xy) + gTime * 0.0199814), random(gl_FragCoord.yx - gTime * 0.074115)) * 2.0 - 1.0;
     for(int y = -1; y <= 1; ++y)
         for(int x = -1; x <= 1; ++x) {
-            float pcfDepth = texture(samp, projCoords.xy + vec2(x, y) * texelSize).r;
+            float pcfDepth = texture(samp, projCoords.xy + (vec2(x, y) + offset) * texelSize).r;
             shadow += currentDepth - bias > pcfDepth ? 1.0 : 0.0;
         }
     
     return shadow / 9.0;
+#endif
 }
+#endif

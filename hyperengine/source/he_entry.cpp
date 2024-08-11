@@ -107,6 +107,12 @@ struct Transform final {
 		glm::vec4 perspective;
 		glm::decompose(mat, scale, orientation, translation, skew, perspective);
 	}
+
+	void translate(glm::vec3 direction) {
+		glm::mat4 matrix = get();
+		matrix = glm::translate(matrix, direction);
+		set(matrix);
+	}
 };
 
 static void initImGui(hyperengine::Window& window) {
@@ -413,15 +419,16 @@ struct LightComponent final {
 #define CAT(a, b) CAT_(a, b)
 #define VARNAME(Var) CAT(Var, __LINE__)
 #define UNNAMABLE VARNAME(_reserved)
+#define ARRAYSIZE(_array) ((int)(sizeof(_array) / sizeof(*(_array))))
 
-struct UniformEngineData {
-	glm::mat4 projection;
+struct UniformEngineData final {
+	glm::mat4 projection;   
 	glm::mat4 view;
 	glm::mat4 lightmat;
 	glm::vec3 skyColor;
 	float farPlane;
 	glm::vec3 sunDirection;
-	float UNNAMABLE;
+	float gTime;
 	glm::vec3 sunColor;
 	float UNNAMABLE;
 };
@@ -434,6 +441,7 @@ static_assert(offsetof(UniformEngineData, lightmat)     == 128);
 static_assert(offsetof(UniformEngineData, skyColor)     == 192);
 static_assert(offsetof(UniformEngineData, farPlane)     == 204);
 static_assert(offsetof(UniformEngineData, sunDirection) == 208);
+static_assert(offsetof(UniformEngineData, gTime)        == 220);
 static_assert(offsetof(UniformEngineData, sunColor)     == 224);
 
 struct Views final {
@@ -1154,6 +1162,188 @@ struct Engine final {
 			ImGui::ShowDemoWindow(&mViews.imguiDemoWindow);
 	}
 
+	void resizeFramebuffers(glm::ivec2 targetSize) {
+		if (mViewportSize == targetSize) return;
+		mViewportSize = targetSize;
+
+		using enum hyperengine::Texture::WrapMode;
+		using enum hyperengine::Texture::FilterMode;
+
+		mFramebufferColor = {{
+			.width = mViewportSize.x,
+			.height = mViewportSize.y,
+			.format = hyperengine::PixelFormat::kRgba32f,
+			.minFilter = kLinear,
+			.magFilter = kLinear,
+			.wrap = kClampEdge,
+			.label = "framebuffer viewport color"
+		}};
+
+		mFramebufferDepth = {{
+			.width = mViewportSize.x,
+			.height = mViewportSize.y,
+			.format = hyperengine::PixelFormat::kD24,
+			.label = "framebuffer viewport depth"
+		}};
+
+		std::array<hyperengine::Framebuffer::Attachment, 2> attachments{
+			hyperengine::Framebuffer::Attachment(GL_COLOR_ATTACHMENT0, std::ref(mFramebufferColor)),
+			hyperengine::Framebuffer::Attachment(GL_DEPTH_ATTACHMENT, std::ref(mFramebufferDepth)),
+		};
+
+		mFramebuffer = {{ .attachments = attachments }};
+
+		mPostFramebufferColor = { {
+			.width = mViewportSize.x,
+			.height = mViewportSize.y,
+			.format = hyperengine::PixelFormat::kRgba8,
+			.minFilter = kLinear,
+			.magFilter = kLinear,
+			.wrap = kClampEdge,
+			.label = "framebuffer post color"
+		} };
+
+		std::array<hyperengine::Framebuffer::Attachment, 1> attachmentsPost{
+			hyperengine::Framebuffer::Attachment(GL_COLOR_ATTACHMENT0, std::ref(mPostFramebufferColor))
+		};
+
+		mPostFramebuffer = {{ .attachments = attachmentsPost }};
+	}
+
+	void drawScene(Transform& cameraTransform, CameraComponent& cameraCamera, glm::vec3 sunDirection, glm::vec3 sunColor) {
+		if (mViewportSize.x <= 0 || mViewportSize.y <= 0)  return;
+
+		glm::mat4 cameraProjection = glm::perspective(glm::radians(cameraCamera.fov), static_cast<float>(mViewportSize.x) / static_cast<float>(mViewportSize.y), cameraCamera.clippingPlanes.x, cameraCamera.clippingPlanes.y);
+
+		// Depth only pass ; shadowmap
+		{
+			mFramebufferShadow.bind();
+			glViewport(0, 0, mShadowMapSize, mShadowMapSize);
+			glClear(GL_DEPTH_BUFFER_BIT);
+
+			// Calculate center point of adjusted view frustum
+			auto adjustedFrustum = glm::perspective(glm::radians(cameraCamera.fov), static_cast<float>(mViewportSize.x) / static_cast<float>(mViewportSize.y), mShadowMapNear, mShadowMapDistance);
+			auto corners = getSystemSpaceNdcExtremes(adjustedFrustum * glm::inverse(cameraTransform.get()));
+			glm::vec3 center = glm::vec3(0, 0, 0);
+			for (const auto& v : corners)
+				center += glm::vec3(v);
+			center /= static_cast<float>(corners.size());
+
+			// Sun view matrix
+			glm::mat4 lightView = glm::lookAt(-sunDirection + center, center, glm::vec3(0.0f, 1.0f, 0.0f));
+
+			glm::vec3 min = glm::vec3(std::numeric_limits<float>::max());
+			glm::vec3 max = glm::vec3(std::numeric_limits<float>::lowest());
+
+			for (const auto& v : corners) {
+				const auto trf = lightView * glm::vec4(v, 1.0f);
+				min.x = glm::min(min.x, trf.x);
+				max.x = glm::max(max.x, trf.x);
+				min.y = glm::min(min.y, trf.y);
+				max.y = glm::max(max.y, trf.y);
+				min.z = glm::min(min.z, trf.z);
+				max.z = glm::max(max.z, trf.z);
+			}
+
+			min.z -= mShadowMapOffset;
+
+			glm::mat4 lightProjection = glm::ortho(min.x, max.x, min.y, max.y, min.z, max.z);
+
+			// Update engine uniform data
+			mUniformEngineData.projection = cameraProjection;
+			mUniformEngineData.view = glm::inverse(cameraTransform.get());
+			mUniformEngineData.lightmat = lightProjection * lightView;
+			mUniformEngineData.skyColor = mSkyColor;
+			mUniformEngineData.farPlane = cameraCamera.clippingPlanes[1];
+			mUniformEngineData.sunDirection = sunDirection;
+			mUniformEngineData.gTime = static_cast<float>(glfwGetTime());
+			mUniformEngineData.sunColor = sunColor;
+			// Upload buffer
+			glBindBuffer(GL_UNIFORM_BUFFER, mEngineUniformBuffer);
+			glBufferSubData(GL_UNIFORM_BUFFER, 0, sizeof(decltype(mUniformEngineData)), &mUniformEngineData);
+			glBindBuffer(GL_UNIFORM_BUFFER, 0);
+
+			// setup drawing
+			mShadowProgram->bind();
+
+			glDisable(GL_CULL_FACE);
+
+			for (auto&& [entity, gameObject, meshFilter, meshRenderer] : mRegistry.view<GameObjectComponent, MeshFilterComponent, MeshRendererComponent>().each()) {
+				if (!meshRenderer.shader) continue;
+				if (!meshFilter.mesh) continue;
+
+				// Assign all needed textures
+				for (auto const& [k, v] : meshRenderer.shader->opaqueAssignments()) {
+					if (meshRenderer.textures[v])
+						meshRenderer.textures[v]->bind(v);
+					else
+						mInternalTextureBlack->bind(v);
+				}
+
+				mShadowProgram->uniformMat4f("uTransform", gameObject.transform.get());
+				meshFilter.mesh->draw();
+			}
+
+			glEnable(GL_CULL_FACE);
+		}
+
+		// Render scene
+		mFramebuffer.bind();
+		glViewport(0, 0, mViewportSize.x, mViewportSize.y);
+		glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+		glClearColor(mSkyColor.r, mSkyColor.g, mSkyColor.b, 1.0f);
+
+		if (mWireframe) glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
+
+		for (auto&& [entity, gameObject, meshFilter, meshRenderer] : mRegistry.view<GameObjectComponent, MeshFilterComponent, MeshRendererComponent>().each()) {
+			if (!meshRenderer.shader) continue;
+			if (!meshFilter.mesh) continue;
+
+			// Assign all needed textures
+			for (auto const& [k, v] : meshRenderer.shader->opaqueAssignments()) {
+
+				if (k == "tShadowMap") {
+					mFramebufferShadowDepth.bind(v);
+				}
+				else {
+					if (meshRenderer.textures[v])
+						meshRenderer.textures[v]->bind(v);
+					else
+						mInternalTextureBlack->bind(v);
+				}
+
+
+			}
+
+			// Upload material changes and bind buffer for prep
+			meshRenderer.uploadAndPrep();
+
+			if (!meshRenderer.shader->cull()) glDisable(GL_CULL_FACE);
+			meshRenderer.shader->bind();
+			meshRenderer.shader->uniformMat4f("uTransform", gameObject.transform.get());
+			meshRenderer.shader->uniform3f("uSkyColor", mSkyColor);
+			meshFilter.mesh->draw();
+			if (!meshRenderer.shader->cull()) glEnable(GL_CULL_FACE);
+		}
+
+		if (mWireframe) glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
+
+		// Tonemap // aces
+		glBindVertexArray(mEmptyVao);
+		mPostFramebuffer.bind();
+		glDisable(GL_CULL_FACE);
+		glDisable(GL_DEPTH_TEST);
+
+		mAcesProgram->bind();
+		mFramebufferColor.bind(0);
+		glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+
+		glEnable(GL_DEPTH_TEST);
+		glEnable(GL_CULL_FACE);
+		glBindFramebuffer(GL_FRAMEBUFFER, 0);
+
+	}
+
 	void update() {
 		ZoneScoped;
 		TracyGpuZone(TracyFunction);
@@ -1163,6 +1353,8 @@ struct Engine final {
 		if (ImGui::Begin("Passes")) {
 			ImGui::Image((void*)(uintptr_t)mFramebufferShadowDepth.handle(), { 256, 256 }, { 0, 1 }, { 1, 0 });
 			ImGui::DragFloat("ShadowMap Offset", &mShadowMapOffset);
+
+			ImGui::DragFloat("ShadowMap Near", &mShadowMapNear);
 			ImGui::DragFloat("ShadowMap Distance", &mShadowMapDistance);
 
 			if(ImGui::DragInt("ShadowMap Size", &mShadowMapSize, 1.0f, 32, 16384))
@@ -1179,261 +1371,79 @@ struct Engine final {
 				glm::ivec2 contentAvail = std::bit_cast<glm::vec2>(ImGui::GetContentRegionAvail());
 
 				if (contentAvail.x > 0 && contentAvail.y > 0) {
+					// Resize framebuffers if needed
+					resizeFramebuffers(contentAvail);
 
-					// Different sizes, gotta resize the viewport buffer
-					if (contentAvail != mViewportSize) {
-						using enum hyperengine::Texture::WrapMode;
-						using enum hyperengine::Texture::FilterMode;
-
-						mViewportSize = contentAvail;
-
-						mFramebufferColor = {{
-							.width = mViewportSize.x,
-							.height = mViewportSize.y,
-							.format = hyperengine::PixelFormat::kRgba32f,
-							.minFilter = kLinear,
-							.magFilter = kLinear,
-							.wrap = kClampEdge,
-							.label = "framebuffer viewport color"
-						}};
-
-						mFramebufferDepth = {{
-							.width = mViewportSize.x,
-							.height = mViewportSize.y,
-							.format = hyperengine::PixelFormat::kD24,
-							.label =  "framebuffer viewport depth"
-						}};
-
-						std::array<hyperengine::Framebuffer::Attachment, 2> attachments{
-							hyperengine::Framebuffer::Attachment(GL_COLOR_ATTACHMENT0, std::ref(mFramebufferColor)),
-							hyperengine::Framebuffer::Attachment(GL_DEPTH_ATTACHMENT, std::ref(mFramebufferDepth)),
-						};
-
-						mFramebuffer = {{ .attachments = attachments }};
-
-						mPostFramebufferColor = {{
-							.width = mViewportSize.x,
-							.height = mViewportSize.y,
-							.format = hyperengine::PixelFormat::kRgba8,
-							.minFilter = kLinear,
-							.magFilter = kLinear,
-							.wrap = kClampEdge,
-							.label = "framebuffer post color"
-						}};
-
-						std::array<hyperengine::Framebuffer::Attachment, 1> attachmentsPost{
-							hyperengine::Framebuffer::Attachment(GL_COLOR_ATTACHMENT0, std::ref(mPostFramebufferColor))
-						};
-
-						mPostFramebuffer = {{ .attachments = attachmentsPost }};
-					}
-
-					mFramebuffer.bind();
-
-					glm::mat4 cameraProjection;
+					// Defaults
 					Transform* cameraTransform =  nullptr;
 					CameraComponent* cameraCamera = nullptr;
-
-					// In absence of a sun, assert a white directional light pointing directly down
 					glm::vec3 sunDirection = glm::normalize(glm::vec3(0.0f, -1.0f, 0.01f));
 					glm::vec3 sunColor = glm::vec3(1.0f) * 3.0f;
 
-					{
-						// Find camera, set vals
-						for (auto&& [entity, gameObject, camera] : mRegistry.view<GameObjectComponent, CameraComponent>().each()) {
-							cameraTransform = &gameObject.transform;
-							cameraCamera = &camera;
-							cameraProjection = glm::perspective(glm::radians(camera.fov), static_cast<float>(mViewportSize.x) / static_cast<float>(mViewportSize.y), camera.clippingPlanes.x, camera.clippingPlanes.y);
-							break;
-						}
-
-						// Find sun
-						for (auto&& [entity, gameObject, light] : mRegistry.view<GameObjectComponent, LightComponent>().each()) {
-							sunDirection = glm::normalize(glm::vec3(gameObject.transform.get() * glm::vec4(0, 0, -1, 0)));
-							sunColor = light.color * light.strength;
-							break;
-						}
-
-						if (cameraTransform && cameraCamera) {
-							// Draw image
-							ImGui::Image((void*)(uintptr_t)mPostFramebufferColor.handle(), ImGui::GetContentRegionAvail(), { 0, 1 }, { 1, 0 });
-
-							// Draw transformation widget
-							if (mSelected != entt::null) {
-								GameObjectComponent& gameObject = mRegistry.get<GameObjectComponent>(mSelected);
-								glm::mat4 matrix = gameObject.transform.get();
-
-								ImGuizmo::SetDrawlist();
-								ImGuizmo::SetRect(ImGui::GetWindowPos().x, ImGui::GetWindowPos().y, ImGui::GetWindowWidth(), ImGui::GetWindowHeight());
-								ImGuizmo::Enable(ImGui::IsWindowFocused());
-
-								if (ImGuizmo::Manipulate(glm::value_ptr(glm::inverse(cameraTransform->get())), glm::value_ptr(cameraProjection), mOperation, mMode, glm::value_ptr(matrix)))
-									gameObject.transform.set(matrix);
-							}
-
-							// Move camera in scene
-							if (ImGui::IsWindowFocused() && ImGui::IsWindowHovered()) {
-								if (ImGui::IsMouseDown(ImGuiMouseButton_Right)) {
-									glm::vec3 direction{};
-
-									if (ImGui::IsKeyDown(ImGuiKey_A)) --direction.x;
-									if (ImGui::IsKeyDown(ImGuiKey_D)) ++direction.x;
-									if (ImGui::IsKeyDown(ImGuiKey_LeftShift)) --direction.y;
-									if (ImGui::IsKeyDown(ImGuiKey_Space)) ++direction.y;
-									if (ImGui::IsKeyDown(ImGuiKey_W)) --direction.z;
-									if (ImGui::IsKeyDown(ImGuiKey_S)) ++direction.z;
-
-									if (glm::length2(direction) > 0) {
-										direction = glm::normalize(direction);
-
-										glm::mat4 matrix = cameraTransform->get();
-										matrix = glm::translate(matrix, direction * 10.0f * ImGui::GetIO().DeltaTime);
-										cameraTransform->set(matrix);
-									}
-
-									ImVec2 drag = ImGui::GetIO().MouseDelta;
-									glm::vec4 worldUp = glm::vec4(0, 1, 0, 0) * cameraTransform->get();
-									cameraTransform->orientation = glm::rotate(cameraTransform->orientation, glm::radians(drag.x * -0.3f), glm::vec3(worldUp));
-									cameraTransform->orientation = glm::rotate(cameraTransform->orientation, glm::radians(drag.y * -0.3f), { 1, 0, 0 });
-								}
-								else {
-									if (ImGui::IsKeyPressed(ImGuiKey_W)) mOperation = ImGuizmo::TRANSLATE;
-									else if (ImGui::IsKeyPressed(ImGuiKey_E)) mOperation = ImGuizmo::ROTATE;
-									else if (ImGui::IsKeyPressed(ImGuiKey_R)) mOperation = ImGuizmo::SCALE;
-								}
-							}
-
-							// Depth pass
-							mFramebufferShadow.bind();
-							glViewport(0, 0, mShadowMapSize, mShadowMapSize);
-							glClear(GL_DEPTH_BUFFER_BIT);
-
-							{
-
-								auto lightLimied = glm::perspective(glm::radians(cameraCamera->fov), static_cast<float>(mViewportSize.x) / static_cast<float>(mViewportSize.y), cameraCamera->clippingPlanes.x, mShadowMapDistance);
-								auto corners = getSystemSpaceNdcExtremes(lightLimied * glm::inverse(cameraTransform->get()));
-								glm::vec3 center = glm::vec3(0, 0, 0);
-								for (const auto& v : corners) {
-									center += glm::vec3(v);
-								}
-								center /= static_cast<float>(corners.size());
-
-								glm::mat4 lightView = glm::lookAt(-sunDirection + center, center, glm::vec3(0.0f, 1.0f, 0.0f));
-
-								glm::vec3 min = glm::vec3(std::numeric_limits<float>::max());
-								glm::vec3 max = glm::vec3(std::numeric_limits<float>::lowest());
-
-								for (const auto& v : corners) {
-									const auto trf = lightView * glm::vec4(v, 1.0f);
-									min.x = glm::min(min.x, trf.x);
-									max.x = glm::max(max.x, trf.x);
-									min.y = glm::min(min.y, trf.y);
-									max.y = glm::max(max.y, trf.y);
-									min.z = glm::min(min.z, trf.z);
-									max.z = glm::max(max.z, trf.z);
-								}
-								
-								min.z -= mShadowMapOffset;
-
-								glm::mat4 lightProjection = glm::ortho(min.x, max.x, min.y, max.y, min.z, max.z);
-
-								// Update engine uniform data
-								mUniformEngineData.projection = cameraProjection;
-								mUniformEngineData.view = glm::inverse(cameraTransform->get());
-								mUniformEngineData.lightmat = lightProjection * lightView;
-								mUniformEngineData.skyColor = mSkyColor;
-								mUniformEngineData.farPlane = cameraCamera->clippingPlanes[1];
-								mUniformEngineData.sunDirection = sunDirection;
-								mUniformEngineData.sunColor = sunColor;
-								// Upload buffer
-								glBindBuffer(GL_UNIFORM_BUFFER, mEngineUniformBuffer);
-								glBufferSubData(GL_UNIFORM_BUFFER, 0, sizeof(decltype(mUniformEngineData)), &mUniformEngineData);
-								glBindBuffer(GL_UNIFORM_BUFFER, 0);
-
-								// setup drawing
-								mShadowProgram->bind();
-								
-								glDisable(GL_CULL_FACE);
-
-								for (auto&& [entity, gameObject, meshFilter, meshRenderer] : mRegistry.view<GameObjectComponent, MeshFilterComponent, MeshRendererComponent>().each()) {
-									if (!meshRenderer.shader) continue;
-									if (!meshFilter.mesh) continue;
-
-									// Assign all needed textures
-									for (auto const& [k, v] : meshRenderer.shader->opaqueAssignments()) {
-										if (meshRenderer.textures[v])
-											meshRenderer.textures[v]->bind(v);
-										else
-											mInternalTextureBlack->bind(v);
-									}
-
-									mShadowProgram->uniformMat4f("uTransform", gameObject.transform.get());
-									meshFilter.mesh->draw();
-									
-								}
-
-								glEnable(GL_CULL_FACE);
-							}
-
-							// Render scene
-							mFramebuffer.bind();
-							glViewport(0, 0, mViewportSize.x, mViewportSize.y);
-							glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-							glClearColor(mSkyColor.r, mSkyColor.g, mSkyColor.b, 1.0f);
-
-							if (mWireframe) glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
-
-							for (auto&& [entity, gameObject, meshFilter, meshRenderer] : mRegistry.view<GameObjectComponent, MeshFilterComponent, MeshRendererComponent>().each()) {
-								if (!meshRenderer.shader) continue;
-								if (!meshFilter.mesh) continue;
-
-								// Assign all needed textures
-								for (auto const& [k, v] : meshRenderer.shader->opaqueAssignments()) {
-
-									if (k == "tShadowMap") {
-										mFramebufferShadowDepth.bind(v);
-									}
-									else {
-										if (meshRenderer.textures[v])
-											meshRenderer.textures[v]->bind(v);
-										else
-											mInternalTextureBlack->bind(v);
-									}
-
-									
-								}
-
-								// Upload material changes and bind buffer for prep
-								meshRenderer.uploadAndPrep();
-
-								if (!meshRenderer.shader->cull()) glDisable(GL_CULL_FACE);
-								meshRenderer.shader->bind();
-								meshRenderer.shader->uniformMat4f("uTransform", gameObject.transform.get());
-								meshRenderer.shader->uniform3f("uSkyColor", mSkyColor);
-								meshFilter.mesh->draw();
-								if (!meshRenderer.shader->cull()) glEnable(GL_CULL_FACE);
-							}
-
-							if (mWireframe) glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
-
-							// Tonemap // aces
-							glBindVertexArray(mEmptyVao);
-							mPostFramebuffer.bind();
-							glDisable(GL_CULL_FACE);
-							glDisable(GL_DEPTH_TEST);
-							
-							mAcesProgram->bind();
-							mFramebufferColor.bind(0);
-							glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
-
-							glEnable(GL_DEPTH_TEST);
-							glEnable(GL_CULL_FACE);
-							glBindFramebuffer(GL_FRAMEBUFFER, 0);
-						}
-						else
-							ImGui::TextUnformatted("No camera found");
+					// Find camera
+					for (auto&& [entity, gameObject, camera] : mRegistry.view<GameObjectComponent, CameraComponent>().each()) {
+						cameraTransform = &gameObject.transform;
+						cameraCamera = &camera;
+						break;
 					}
-					
+
+					// Find sun
+					for (auto&& [entity, gameObject, light] : mRegistry.view<GameObjectComponent, LightComponent>().each()) {
+						sunDirection = glm::normalize(glm::vec3(gameObject.transform.get() * glm::vec4(0, 0, -1, 0)));
+						sunColor = light.color * light.strength;
+						break;
+					}
+
+					if (cameraTransform && cameraCamera) {
+						// Draw image
+						ImGui::Image((void*)(uintptr_t)mPostFramebufferColor.handle(), ImGui::GetContentRegionAvail(), { 0, 1 }, { 1, 0 });
+
+						// Draw transformation widget
+						if (mSelected != entt::null) {
+							GameObjectComponent& gameObject = mRegistry.get<GameObjectComponent>(mSelected);
+							glm::mat4 matrix = gameObject.transform.get();
+
+							ImGuizmo::SetDrawlist();
+							ImGuizmo::SetRect(ImGui::GetWindowPos().x, ImGui::GetWindowPos().y, ImGui::GetWindowWidth(), ImGui::GetWindowHeight());
+							ImGuizmo::Enable(ImGui::IsWindowFocused());
+
+							glm::mat4 cameraProjection = glm::perspective(glm::radians(cameraCamera->fov), static_cast<float>(mViewportSize.x) / static_cast<float>(mViewportSize.y), cameraCamera->clippingPlanes.x, cameraCamera->clippingPlanes.y);
+
+							if (ImGuizmo::Manipulate(glm::value_ptr(glm::inverse(cameraTransform->get())), glm::value_ptr(cameraProjection), mOperation, mMode, glm::value_ptr(matrix)))
+								gameObject.transform.set(matrix);
+						}
+
+						// Move camera in scene
+						if (ImGui::IsWindowFocused() && ImGui::IsWindowHovered()) {
+							if (ImGui::IsMouseDown(ImGuiMouseButton_Right)) {
+								glm::vec3 direction{};
+
+								if (ImGui::IsKeyDown(ImGuiKey_A)) --direction.x;
+								if (ImGui::IsKeyDown(ImGuiKey_D)) ++direction.x;
+								if (ImGui::IsKeyDown(ImGuiKey_LeftShift)) --direction.y;
+								if (ImGui::IsKeyDown(ImGuiKey_Space)) ++direction.y;
+								if (ImGui::IsKeyDown(ImGuiKey_W)) --direction.z;
+								if (ImGui::IsKeyDown(ImGuiKey_S)) ++direction.z;
+
+								if (glm::length2(direction) > 0)
+									cameraTransform->translate(glm::normalize(direction) * 10.0f * ImGui::GetIO().DeltaTime);
+
+								ImVec2 drag = ImGui::GetIO().MouseDelta;
+								glm::vec3 worldUp = glm::vec3(glm::vec4(0, 1, 0, 0) * cameraTransform->get());
+								cameraTransform->orientation = glm::rotate(cameraTransform->orientation, glm::radians(drag.x * -0.3f), worldUp);
+								cameraTransform->orientation = glm::rotate(cameraTransform->orientation, glm::radians(drag.y * -0.3f), { 1, 0, 0 });
+							}
+							else {
+								if (ImGui::IsKeyPressed(ImGuiKey_W)) mOperation = ImGuizmo::TRANSLATE;
+								else if (ImGui::IsKeyPressed(ImGuiKey_E)) mOperation = ImGuizmo::ROTATE;
+								else if (ImGui::IsKeyPressed(ImGuiKey_R)) mOperation = ImGuizmo::SCALE;
+							}
+						}
+
+						drawScene(*cameraTransform, *cameraCamera, sunDirection, sunColor);
+					}
+					else
+						ImGui::TextUnformatted("No camera found");
 				}
 			}
 			ImGui::End();
@@ -1446,8 +1456,9 @@ struct Engine final {
 
 	hyperengine::Window mWindow;
 
-	float mShadowMapOffset = 10.0f;
-	float mShadowMapDistance = 50.0f;
+	float mShadowMapOffset = 16.0f;
+	float mShadowMapNear = 0.1f;
+	float mShadowMapDistance = 64.0f;
 	int mShadowMapSize = 2048;
 	hyperengine::Framebuffer mFramebufferShadow;
 	hyperengine::Texture mFramebufferShadowDepth;
