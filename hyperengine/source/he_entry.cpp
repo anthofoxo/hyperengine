@@ -1,5 +1,6 @@
 #ifdef _WIN32
 #	include <Windows.h>
+#	include <shlobj_core.h>
 #	undef near
 #	undef far
 #endif
@@ -69,6 +70,8 @@
 #include <spdlog/spdlog.h>
 
 #include <tinyfiledialogs.h>
+
+#include <filesystem>
 
 [[nodiscard]] HE_ALLOCATOR(count) void* operator new(std::size_t count)
 {
@@ -222,7 +225,6 @@ auto glslShaderDef() {
 	return langDef;
 }
 
-// TODO: Prevent text editor from closing when saving changes
 struct TextEditorInfo {
 	TextEditor editor;
 	bool enabled = false;
@@ -315,7 +317,8 @@ struct ResourceManager final {
 			markers.insert(std::make_pair(k, str));
 		}
 		editor.SetErrorMarkers(markers);
-		mShaderEditor[pathStr] = { editor, !parsed.empty() };
+		bool opened = mShaderEditor[pathStr].enabled;
+		mShaderEditor[pathStr] = { editor, opened || !parsed.empty() };
 	}
 
 	std::shared_ptr<hyperengine::ShaderProgram> getShaderProgram(std::string_view path) {
@@ -400,14 +403,37 @@ struct CameraComponent {
 	float fov = 80.0f;
 };
 
+struct LightComponent final {
+	glm::vec3 color = glm::vec3(1.0f);
+	float strength = 3.0f;
+};
+
+#define CAT_(a, b) a ## b
+#define CAT(a, b) CAT_(a, b)
+#define VARNAME(Var) CAT(Var, __LINE__)
+#define UNNAMABLE VARNAME(_reserved)
+
 struct UniformEngineData {
 	glm::mat4 projection;
 	glm::mat4 view;
+	glm::mat4 lightmat;
 	glm::vec3 skyColor;
 	float farPlane;
+	glm::vec3 sunDirection;
+	float UNNAMABLE;
+	glm::vec3 sunColor;
+	float UNNAMABLE;
 };
 
-static_assert(sizeof(UniformEngineData) == 144); // Match std140 glsl layout
+// Assert layout matches glsl std140
+static_assert(sizeof(UniformEngineData) == 240);
+static_assert(offsetof(UniformEngineData, projection)   ==   0);
+static_assert(offsetof(UniformEngineData, view)         ==  64);
+static_assert(offsetof(UniformEngineData, lightmat)     == 128);
+static_assert(offsetof(UniformEngineData, skyColor)     == 192);
+static_assert(offsetof(UniformEngineData, farPlane)     == 204);
+static_assert(offsetof(UniformEngineData, sunDirection) == 208);
+static_assert(offsetof(UniformEngineData, sunColor)     == 224);
 
 struct Views final {
 	bool hierarchy = true;
@@ -439,6 +465,31 @@ bool drawComponentEditGui(entt::registry& registry, entt::entity entity, char co
 		func(*component, ptr);
 
 	return true;
+}
+
+std::vector<glm::vec4> getFrustumCornersWorldSpace(const glm::mat4& proj, const glm::mat4& view)
+{
+	const auto inv = glm::inverse(proj * view);
+
+	std::vector<glm::vec4> frustumCorners;
+	for (unsigned int x = 0; x < 2; ++x)
+	{
+		for (unsigned int y = 0; y < 2; ++y)
+		{
+			for (unsigned int z = 0; z < 2; ++z)
+			{
+				const glm::vec4 pt =
+					inv * glm::vec4(
+						2.0f * x - 1.0f,
+						2.0f * y - 1.0f,
+						2.0f * z - 1.0f,
+						1.0f);
+				frustumCorners.push_back(pt / pt.w);
+			}
+		}
+	}
+
+	return frustumCorners;
 }
 
 struct Engine final {
@@ -473,6 +524,9 @@ struct Engine final {
 			mInternalTextureUv = std::make_shared<hyperengine::Texture>(std::move(tex));
 			mResourceManager.mTextures[std::string(kInternalTextureUvName)] = mInternalTextureUv;
 		}
+
+		mAcesProgram = mResourceManager.getShaderProgram("shaders/aces.glsl");
+		mShadowProgram = mResourceManager.getShaderProgram("shaders/shadow.glsl");
 	}
 
 	void init() {
@@ -486,7 +540,6 @@ struct Engine final {
 		if (GLAD_GL_KHR_debug) {
 			glEnable(GL_DEBUG_OUTPUT);
 			glEnable(GL_DEBUG_OUTPUT_SYNCHRONOUS);
-			glDebugMessageCallback(&hyperengine::glMessageCallback, nullptr);
 			glDebugMessageCallback(&hyperengine::glMessageCallback, nullptr);
 			glDebugMessageControl(GL_DONT_CARE, GL_DONT_CARE, GL_DEBUG_SEVERITY_NOTIFICATION, 0, nullptr, GL_FALSE);
 		}
@@ -514,6 +567,7 @@ struct Engine final {
 
 		glEnable(GL_DEPTH_TEST);
 		glEnable(GL_CULL_FACE);
+		glDisable(GL_MULTISAMPLE);
 		glCullFace(GL_BACK);
 
 		// TODO: Implment buffer abstraction, we actually leak memory a bit rn
@@ -522,10 +576,37 @@ struct Engine final {
 		glBufferData(GL_UNIFORM_BUFFER, sizeof(decltype(mUniformEngineData)), nullptr, GL_DYNAMIC_DRAW);
 		glBindBuffer(GL_UNIFORM_BUFFER, 0);
 		glBindBufferBase(GL_UNIFORM_BUFFER, 0, mEngineUniformBuffer);
+		genShadowmap();
+	}
+
+	void genShadowmap() {
+		mFramebufferShadowDepth = { {
+				.width = mShadowMapSize,
+				.height = mShadowMapSize,
+				.format = hyperengine::PixelFormat::kD24,
+				.minFilter = GL_NEAREST,
+				.magFilter = GL_NEAREST,
+				.wrap = GL_CLAMP_TO_BORDER,
+				.label = "shadow depth"
+			} };
+
+
+
+		std::array<hyperengine::Framebuffer::Attachment, 1> attachments{
+			hyperengine::Framebuffer::Attachment(GL_DEPTH_ATTACHMENT, std::ref(mFramebufferShadowDepth)),
+		};
+
+		mFramebufferShadow = { {.attachments = attachments } };
+		mFramebufferShadow.bind();
+		glDrawBuffer(GL_NONE);
+		glReadBuffer(GL_NONE);
+		glBindFramebuffer(GL_FRAMEBUFFER, 0);
 	}
 
 	void run() {
 		init();
+
+		glGenVertexArrays(1, &mEmptyVao);
 
 		while (mRunning) {
 			glfwPollEvents();
@@ -544,6 +625,8 @@ struct Engine final {
 			TracyGpuCollect;
 			FrameMark;
 		}
+
+		glDeleteVertexArrays(1, &mEmptyVao);
 
 		destroyImGui();
 		mAudioEngine.uninit();
@@ -584,6 +667,11 @@ struct Engine final {
 						comp.transform.orientation = glm::rotate(comp.transform.orientation, deltaEuler.z, glm::vec3(0, 0, 1));
 					}
 					ImGui::DragFloat3("Scale", glm::value_ptr(comp.transform.scale), 0.1f);
+				});
+
+				bool hasLight = drawComponentEditGui<LightComponent, Engine>(mRegistry, mSelected, "Light", this, [](auto& comp, auto* ptr) {
+					ImGui::ColorEdit3("Color", glm::value_ptr(comp.color));
+					ImGui::DragFloat("Strength", &comp.strength, 0.1f);
 				});
 
 				bool hasMeshFilter = drawComponentEditGui<MeshFilterComponent, Engine>(mRegistry, mSelected, "Mesh Filter", this, [](auto& comp, auto* ptr) {
@@ -703,6 +791,7 @@ struct Engine final {
 				if (!hasGameObject && ImGui::Button("Game Object")) mRegistry.emplace<GameObjectComponent>(mSelected);
 				if (!hasMeshFilter && ImGui::Button("Mesh Filter")) mRegistry.emplace<MeshFilterComponent>(mSelected);
 				if (!hasMeshRenderer && ImGui::Button("Mesh Renderer")) mRegistry.emplace<MeshRendererComponent>(mSelected);
+				if (!hasLight && ImGui::Button("Light")) mRegistry.emplace<LightComponent>(mSelected);
 				if (!hasCamera && ImGui::Button("Camera")) mRegistry.emplace<CameraComponent>(mSelected);
 			}
 		}
@@ -984,6 +1073,27 @@ struct Engine final {
 				ImGui::EndMenu();
 			}
 
+			if (ImGui::BeginMenu("Debug")) {
+				if (ImGui::MenuItem("Capture Frame", nullptr, nullptr, hyperengine::isRenderDocRunning())) {
+					hyperengine::rdoc::triggerCapture();
+				}
+
+				if (ImGui::MenuItem("Attach RenderDoc", nullptr, nullptr, hyperengine::isRenderDocRunning() && !hyperengine::rdoc::isTargetControlConnected())) {
+					std::thread([](){
+#ifdef _WIN32
+						CHAR pf[MAX_PATH];
+						SHGetSpecialFolderPathA(nullptr, pf, CSIDL_PROGRAM_FILES, false);
+						std::string path = std::format("\"{}/RenderDoc/qrenderdoc.exe\" --targetcontrol", pf);
+						system(path.c_str());
+#else
+						system("/bin/qrenderdoc --targetcontrol");
+#endif
+					}).detach();
+				}
+
+				ImGui::EndMenu();
+			}
+
 			ImGui::EndMainMenuBar();
 		}
 
@@ -1051,11 +1161,26 @@ struct Engine final {
 			ImGui::ShowDemoWindow(&mViews.imguiDemoWindow);
 	}
 
+	float mShadowMapOffset = 20.0f;
+	float mShadowMapDistance = 80.0f;
+	float zMult = 10.0f;
+
 	void update() {
 		ZoneScoped;
 		TracyGpuZone(TracyFunction);
 
 		drawUi();
+
+		if (ImGui::Begin("Passes")) {
+			ImGui::Image((void*)(uintptr_t)mFramebufferShadowDepth.handle(), { 256, 256 }, { 0, 1 }, { 1, 0 });
+			ImGui::DragFloat("ShadowMap Offset", &mShadowMapOffset);
+			ImGui::DragFloat("ShadowMap Distance", &mShadowMapDistance);
+			ImGui::DragFloat("ZMul", &zMult);
+
+			if(ImGui::DragInt("ShadowMap Size", &mShadowMapSize, 1.0f, 32, 16384))
+				genShadowmap();
+		}
+		ImGui::End();
 
 		if (mViews.viewport) {
 			ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, { 0, 0 });
@@ -1074,7 +1199,7 @@ struct Engine final {
 						mFramebufferColor = {{
 							.width = mViewportSize.x,
 							.height = mViewportSize.y,
-							.format = hyperengine::PixelFormat::kRgba8,
+							.format = hyperengine::PixelFormat::kRgba32f,
 							.minFilter = GL_LINEAR,
 							.magFilter = GL_LINEAR,
 							.wrap = GL_CLAMP_TO_EDGE,
@@ -1094,6 +1219,22 @@ struct Engine final {
 						};
 
 						mFramebuffer = {{ .attachments = attachments }};
+
+						mPostFramebufferColor = {{
+							.width = mViewportSize.x,
+							.height = mViewportSize.y,
+							.format = hyperengine::PixelFormat::kRgba8,
+							.minFilter = GL_LINEAR,
+							.magFilter = GL_LINEAR,
+							.wrap = GL_CLAMP_TO_EDGE,
+							.label = "framebuffer post color"
+						}};
+
+						std::array<hyperengine::Framebuffer::Attachment, 1> attachmentsPost{
+							hyperengine::Framebuffer::Attachment(GL_COLOR_ATTACHMENT0, std::ref(mPostFramebufferColor))
+						};
+
+						mPostFramebuffer = {{ .attachments = attachmentsPost }};
 					}
 
 					mFramebuffer.bind();
@@ -1101,6 +1242,11 @@ struct Engine final {
 					glm::mat4 cameraProjection;
 					Transform* cameraTransform =  nullptr;
 					CameraComponent* cameraCamera = nullptr;
+
+					// In absence of a sun, assert a white directional light pointing directly down
+					glm::vec3 sunDirection = glm::vec3(0.0f, -1.0f, 0.0f);
+					glm::vec3 sunColor = glm::vec3(1.0f) * 3.0f;
+
 					{
 						// Find camera, set vals
 						for (auto&& [entity, gameObject, camera] : mRegistry.view<GameObjectComponent, CameraComponent>().each()) {
@@ -1110,9 +1256,16 @@ struct Engine final {
 							break;
 						}
 
+						// Find sun
+						for (auto&& [entity, gameObject, light] : mRegistry.view<GameObjectComponent, LightComponent>().each()) {
+							sunDirection = glm::normalize(glm::vec3(gameObject.transform.get() * glm::vec4(0, 0, -1, 0)));
+							sunColor = light.color * light.strength;
+							break;
+						}
+
 						if (cameraTransform && cameraCamera) {
 							// Draw image
-							ImGui::Image((void*)(uintptr_t)mFramebufferColor.handle(), ImGui::GetContentRegionAvail(), { 0, 1 }, { 1, 0 });
+							ImGui::Image((void*)(uintptr_t)mPostFramebufferColor.handle(), ImGui::GetContentRegionAvail(), { 0, 1 }, { 1, 0 });
 
 							// Draw transformation widget
 							if (mSelected != entt::null) {
@@ -1159,12 +1312,102 @@ struct Engine final {
 								}
 							}
 
+							
+
+							
+
+							// Depth pass
+							mFramebufferShadow.bind();
+							glViewport(0, 0, mShadowMapSize, mShadowMapSize);
+							glClear(GL_DEPTH_BUFFER_BIT);
+
+							{
+
+								auto lightLimied = glm::perspective(glm::radians(cameraCamera->fov), static_cast<float>(mViewportSize.x) / static_cast<float>(mViewportSize.y), cameraCamera->clippingPlanes.x, mShadowMapDistance);
+								auto corners = getFrustumCornersWorldSpace(lightLimied, glm::inverse(cameraTransform->get()));
+								glm::vec3 center = glm::vec3(0, 0, 0);
+								for (const auto& v : corners)
+								{
+									center += glm::vec3(v);
+								}
+								center /= (float)corners.size();
+
+								glm::mat4 lightView = glm::lookAt(-sunDirection + center, center, glm::vec3(0.0f, 1.0f, 0.0f));
+
+								float minX = std::numeric_limits<float>::max();
+								float maxX = std::numeric_limits<float>::lowest();
+								float minY = std::numeric_limits<float>::max();
+								float maxY = std::numeric_limits<float>::lowest();
+								float minZ = std::numeric_limits<float>::max();
+								float maxZ = std::numeric_limits<float>::lowest();
+								for (const auto& v : corners)
+								{
+									const auto trf = lightView * v;
+									minX = std::min(minX, trf.x);
+									maxX = std::max(maxX, trf.x);
+									minY = std::min(minY, trf.y);
+									maxY = std::max(maxY, trf.y);
+									minZ = std::min(minZ, trf.z);
+									maxZ = std::max(maxZ, trf.z);
+								}
+
+								// Tune this parameter according to the scene
+								
+								if (minZ < 0) minZ *= zMult;
+								else minZ /= zMult;
+								if (maxZ < 0) maxZ /= zMult;
+								else maxZ *= zMult;
+								
+								minZ -= mShadowMapOffset;
+
+								glm::mat4 lightProjection = glm::ortho(minX, maxX, minY, maxY, minZ, maxZ);
+
+								// Update engine uniform data
+								mUniformEngineData.projection = lightProjection;
+								mUniformEngineData.view = lightView;
+								mUniformEngineData.lightmat = lightProjection * lightView;
+								mUniformEngineData.skyColor = mSkyColor;
+								mUniformEngineData.farPlane = cameraCamera->clippingPlanes[1];
+								mUniformEngineData.sunDirection = sunDirection;
+								mUniformEngineData.sunColor = sunColor;
+								// Upload buffer
+								glBindBuffer(GL_UNIFORM_BUFFER, mEngineUniformBuffer);
+								glBufferSubData(GL_UNIFORM_BUFFER, 0, sizeof(decltype(mUniformEngineData)), &mUniformEngineData);
+								glBindBuffer(GL_UNIFORM_BUFFER, 0);
+
+								// setup drawing
+								mShadowProgram->bind();
+								
+								glDisable(GL_CULL_FACE);
+
+								for (auto&& [entity, gameObject, meshFilter, meshRenderer] : mRegistry.view<GameObjectComponent, MeshFilterComponent, MeshRendererComponent>().each()) {
+									if (!meshRenderer.shader) continue;
+									if (!meshFilter.mesh) continue;
+
+									// Assign all needed textures
+									for (auto const& [k, v] : meshRenderer.shader->opaqueAssignments()) {
+
+										if (meshRenderer.textures[v])
+											meshRenderer.textures[v]->bind(v);
+										else
+											mInternalTextureBlack->bind(v);
+									}
+
+									mShadowProgram->uniformMat4f("uTransform", gameObject.transform.get());
+									meshFilter.mesh->draw();
+									
+								}
+
+								glEnable(GL_CULL_FACE);
+							}
+
 							// Update engine uniform data
 							mUniformEngineData.projection = cameraProjection;
 							mUniformEngineData.view = glm::inverse(cameraTransform->get());
 							mUniformEngineData.skyColor = mSkyColor;
 							mUniformEngineData.farPlane = cameraCamera->clippingPlanes[1];
-
+							mUniformEngineData.sunDirection = sunDirection;
+							mUniformEngineData.sunColor = sunColor;
 							// Upload buffer
 							glBindBuffer(GL_UNIFORM_BUFFER, mEngineUniformBuffer);
 							glBufferSubData(GL_UNIFORM_BUFFER, 0, sizeof(decltype(mUniformEngineData)), &mUniformEngineData);
@@ -1185,10 +1428,17 @@ struct Engine final {
 								// Assign all needed textures
 								for (auto const& [k, v] : meshRenderer.shader->opaqueAssignments()) {
 
-									if (meshRenderer.textures[v])
-										meshRenderer.textures[v]->bind(v);
-									else
-										mInternalTextureBlack->bind(v);
+									if (k == "tShadowMap") {
+										mFramebufferShadowDepth.bind(v);
+									}
+									else {
+										if (meshRenderer.textures[v])
+											meshRenderer.textures[v]->bind(v);
+										else
+											mInternalTextureBlack->bind(v);
+									}
+
+									
 								}
 
 								// Upload material changes and bind buffer for prep
@@ -1203,6 +1453,19 @@ struct Engine final {
 							}
 
 							if (mWireframe) glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
+
+							// Tonemap // aces
+							glBindVertexArray(mEmptyVao);
+							mPostFramebuffer.bind();
+							glDisable(GL_CULL_FACE);
+							glDisable(GL_DEPTH_TEST);
+							
+							mAcesProgram->bind();
+							mFramebufferColor.bind(0);
+							glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+
+							glEnable(GL_DEPTH_TEST);
+							glEnable(GL_CULL_FACE);
 							glBindFramebuffer(GL_FRAMEBUFFER, 0);
 						}
 						else
@@ -1221,6 +1484,10 @@ struct Engine final {
 
 	hyperengine::Window mWindow;
 
+	int mShadowMapSize = 2048;
+	hyperengine::Framebuffer mFramebufferShadow;
+	hyperengine::Texture mFramebufferShadowDepth;
+
 	hyperengine::AudioEngine mAudioEngine;
 	entt::registry mRegistry;
 	ResourceManager mResourceManager;
@@ -1234,6 +1501,9 @@ struct Engine final {
 	hyperengine::Texture mFramebufferColor;
 	glm::ivec2 mViewportSize{};
 
+	hyperengine::Framebuffer mPostFramebuffer;
+	hyperengine::Texture mPostFramebufferColor;
+
 	glm::vec3 mSkyColor = { 0.7f, 0.8f, 0.9f };
 	bool mWireframe = false;
 
@@ -1243,14 +1513,18 @@ struct Engine final {
 	ImGuizmo::OPERATION mOperation = ImGuizmo::OPERATION::TRANSLATE;
 	ImGuizmo::MODE mMode = ImGuizmo::MODE::LOCAL;
 
+	GLuint mEmptyVao;
+
+	std::shared_ptr<hyperengine::ShaderProgram> mShadowProgram;
+	std::shared_ptr<hyperengine::ShaderProgram> mAcesProgram;
 	std::shared_ptr<hyperengine::Texture> mInternalTextureBlack;
 	std::shared_ptr<hyperengine::Texture> mInternalTextureWhite;
 	std::shared_ptr<hyperengine::Texture> mInternalTextureUv;
 };
 
 int main(int argc, char* argv[]) {
-	spdlog::set_level(spdlog::level::trace);
 	TracySetProgramName("HyperEngine");
+	spdlog::set_level(spdlog::level::trace);
 	hyperengine::setupRenderDoc(true);
 	Engine engine;
 	engine.run();

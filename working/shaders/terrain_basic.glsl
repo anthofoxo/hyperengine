@@ -1,14 +1,15 @@
 layout(std140) uniform EngineData {
     mat4 gProjection;
     mat4 gView;
+    mat4 gLightMat;
     vec3 gSkyColor;
     float gFarPlane;
+    vec3 gSunDirection;
+    vec3 gSunColor;
 };
 
 uniform Material {
     vec4 uTiling;
-    float uDepthOffset;
-    float uHeights;
 };
 
 INPUT(vec3, iPosition, 0);
@@ -18,6 +19,7 @@ VARYING(vec3, vNormal);
 VARYING(vec3, vToCamera);
 VARYING(vec2, vTexCoord);
 VARYING(vec3, vPosition);
+VARYING(vec4, vFragPosLightSpace);
 OUTPUT(vec4, oColor, 0);
 
 uniform mat4 uTransform;
@@ -26,8 +28,8 @@ uniform sampler2D tAlbedo1;
 uniform sampler2D tAlbedo2;
 uniform sampler2D tAlbedo3;
 uniform sampler2D tBlendmap;
-const vec3 kLightDirection = normalize(vec3(0, -3, -1));
-const vec3 kLightColor = vec3(1.0, 1.0, 1.0);
+
+uniform sampler2D tShadowMap;
 
 #ifdef VERT
 void main(void) {
@@ -38,6 +40,7 @@ void main(void) {
     vNormal = transpose(inverse(mat3(uTransform))) * iNormal;
     vToCamera = (inverse(gView) * vec4(0.0, 0.0, 0.0, 1.0)).xyz - worldSpace.xyz;
     vPosition = viewSpace.xyz;
+    vFragPosLightSpace = gLightMat * worldSpace;
 }
 #endif
 
@@ -86,13 +89,45 @@ vec4 textureNoTile(sampler2D samp, in vec2 uv) {
 
 // https://habr.com/en/articles/442924/
 
+const float kGamma = 2.2;
+
+float map(float value, float min1, float max1, float min2, float max2) {
+  return min2 + (value - min1) * (max2 - min2) / (max1 - min1);
+}
+
+float ShadowCalculation(vec4 fragPosLightSpace) {
+    vec3 projCoords = fragPosLightSpace.xyz / fragPosLightSpace.w;
+    projCoords = projCoords * 0.5 + 0.5;
+    
+     if(projCoords.z > 1.0)
+        return 0.0;
+    
+    vec2 texelSize = 1.0 / textureSize(tShadowMap, 0);
+   
+    
+    float currentDepth = projCoords.z;
+    float bias = max(0.003 * (1.0 - dot(vNormal, gSunDirection)), 0.0);
+    
+    float shadow = 0.0;
+   
+    
+    for(int y = -1; y <= 1; ++y) {
+        for(int x = -1; x <= 1; ++x) {
+            float pcfDepth = texture(tShadowMap, projCoords.xy + vec2(x, y) * texelSize).r;
+            shadow += currentDepth - bias > pcfDepth  ? 1.0 : 0.0;
+        }
+    }
+    
+    return shadow / 9.0;
+}
+
 void main(void) {
     vec3 blendmapColor = texture(tBlendmap, vTexCoord).rgb;
     vec4 bias = vec4(1.0 - (blendmapColor.r + blendmapColor.g + blendmapColor.b), blendmapColor);
-    vec4 color0 = textureNoTile(tAlbedo0, vTexCoord * uTiling.x);
-    vec4 color1 = textureNoTile(tAlbedo1, vTexCoord * uTiling.y);
-    vec4 color2 = textureNoTile(tAlbedo2, vTexCoord * uTiling.z);
-    vec4 color3 = textureNoTile(tAlbedo3, vTexCoord * uTiling.w);
+    vec4 color0 = pow(textureNoTile(tAlbedo0, vTexCoord * uTiling.x), vec4(kGamma));
+    vec4 color1 = pow(textureNoTile(tAlbedo1, vTexCoord * uTiling.y), vec4(kGamma));
+    vec4 color2 = pow(textureNoTile(tAlbedo2, vTexCoord * uTiling.z), vec4(kGamma));
+    vec4 color3 = pow(textureNoTile(tAlbedo3, vTexCoord * uTiling.w), vec4(kGamma));
 
 #ifdef USE_OLD_BLENDING
     oColor = vec4(color0.rgb * bias.x + color1.rgb * bias.y + color2.rgb * bias.z + color3.rgb * bias.w, 1.0);
@@ -113,7 +148,10 @@ void main(void) {
 
     vec3 unitNormal = normalize(vNormal);
     vec3 unitToCamera = normalize(vToCamera);
-    oColor.rgb *= max(kLightColor * dot(unitNormal, -kLightDirection), 0.2);
+    
+    float shadow = ShadowCalculation(vFragPosLightSpace);
+    oColor.rgb *= max(gSunColor * dot(unitNormal, -gSunDirection) * (1.0 - shadow), 0.2);
+    
     oColor.rgb = mix(oColor.rgb, gSkyColor, smoothstep(gFarPlane * 0.6, gFarPlane, length(vPosition)));
 }
 #endif

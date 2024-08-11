@@ -1,3 +1,5 @@
+#include "he_platform.hpp"
+
 #if defined __has_include && __has_include(<debugging>)
 #	include <debugging>
 #	if __cpp_lib_debugging >= 202311L

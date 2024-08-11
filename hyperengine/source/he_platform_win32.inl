@@ -1,5 +1,7 @@
 #include <Windows.h>
 
+#include "he_util.hpp" // split
+
 namespace hyperengine {
 	bool isWsl() { return false; }
 
@@ -8,6 +10,18 @@ namespace hyperengine {
 		return ::IsDebuggerPresent();
 	}
 #endif
+
+	std::vector<std::string> getEnvironmentPaths() {
+		std::vector<std::string> pathList;
+		char* value = nullptr;
+		size_t len = 0;
+		if (_dupenv_s(&value, &len, "PATH")) return {};
+		if (value == nullptr) return {};
+		std::string paths = std::string(value, len);
+		free(value);
+		split(paths, pathList, ';');
+		return pathList;
+	}
 }
 
 #ifdef HE_ENTRY_WINMAIN

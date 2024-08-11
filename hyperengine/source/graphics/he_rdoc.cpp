@@ -47,4 +47,25 @@ namespace hyperengine {
 		gApi->MaskOverlayBits(eRENDERDOC_Overlay_None, eRENDERDOC_Overlay_None);
 		gApi->SetCaptureOptionU32(eRENDERDOC_Option_DebugOutputMute, 0);
 	}
+
+	bool isRenderDocRunning() {
+		return gApi;
+	}
+
+	namespace rdoc {
+		bool isTargetControlConnected() {
+			if (!gApi) return false;
+			return gApi->IsTargetControlConnected();
+		}
+
+		void triggerCapture() {
+			if (!gApi) return;
+			gApi->TriggerCapture();
+		}
+
+		bool isFrameCapturing() {
+			if (!gApi) return false;
+			return gApi->IsFrameCapturing();
+		}
+	}
 }

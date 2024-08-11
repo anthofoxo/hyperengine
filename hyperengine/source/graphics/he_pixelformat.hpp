@@ -5,7 +5,8 @@
 namespace hyperengine {
 	enum struct PixelFormat {
 		kRgba8,
-		kD24
+		kD24,
+		kRgba32f
 	};
 
 	GLenum pixelFormatToInternalFormat(PixelFormat format);

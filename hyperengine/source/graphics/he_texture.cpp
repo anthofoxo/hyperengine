@@ -17,6 +17,8 @@ namespace hyperengine {
 			maxAnisotropy = glm::min(hyperengine::glContextInfo().maxAnisotropy, 8.0f); // Use 8x anisotropy max
 		}
 
+		float borderColor[] = { 1.0f, 1.0f, 1.0f, 1.0f };
+
 		if (GLAD_GL_ARB_direct_state_access) {
 			glCreateTextures(GL_TEXTURE_2D, 1, &mHandle);
 			glTextureParameteri(mHandle, GL_TEXTURE_MIN_FILTER, info.minFilter);
@@ -24,6 +26,7 @@ namespace hyperengine {
 			glTextureParameteri(mHandle, GL_TEXTURE_WRAP_S, info.wrap);
 			glTextureParameteri(mHandle, GL_TEXTURE_WRAP_T, info.wrap);
 			glTextureParameteri(mHandle, GL_TEXTURE_MAX_LEVEL, maxLevel);
+			glTextureParameterfv(mHandle, GL_TEXTURE_BORDER_COLOR, borderColor);
 			if(maxAnisotropy > 0.0f)
 				glTextureParameterf(mHandle, GL_TEXTURE_MAX_ANISOTROPY, maxAnisotropy);
 			glTextureStorage2D(mHandle, maxLevel + 1, pixelFormatToInternalFormat(info.format), info.width, info.height);
@@ -40,6 +43,7 @@ namespace hyperengine {
 			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, info.wrap);
 			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, info.wrap);
 			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, maxLevel);
+			glTexParameterfv(GL_TEXTURE_2D, GL_TEXTURE_BORDER_COLOR, borderColor);
 			if (maxAnisotropy > 0.0f)
 				glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MAX_ANISOTROPY, maxAnisotropy);
 

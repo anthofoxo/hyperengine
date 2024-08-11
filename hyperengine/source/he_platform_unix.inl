@@ -19,4 +19,11 @@ namespace hyperengine {
 		return false;
 	}
 #endif
+
+	std::vector<std::string> getEnvironmentPaths() {
+		std::vector<std::string> pathList;
+		std::string paths = getenv("PATH");
+		split(paths, pathList, ':');
+		return pathList;
+	}
 }

@@ -4,7 +4,7 @@ local objects = {
     scale = { 75, 75, 75 },
     name    = "ground",
     mesh    = "plane.obj",
-    shader  = "terrain_basic.glsl",
+    shader  = "shaders/terrain_basic.glsl",
     textures = {
       tAlbedo0 = "grass.png",
       tAlbedo1 = "dirt.png",
@@ -19,7 +19,7 @@ local objects = {
     scale = { 5, 5, 5 },
     name    = "varoom",
     mesh    = "varoom.obj",
-    shader  = "opaque.glsl",
+    shader  = "shaders/opaque.glsl",
     textures = { tAlbedo = "varoom.png" },
     material = { uColor = { 0.0, 1.0, 1.0 } }
   },
@@ -30,7 +30,7 @@ local objects = {
     mesh    = "dragon.obj",
     textures = { tAlbedo = "internal://white.png", tSpecular = "internal://white.png" },
     specular = "internal://white.png",
-    shader  = "opaque.glsl",
+    shader  = "shaders/opaque.glsl",
     material = { uColor = { 1.0, 0.75, 0.4 } }
   },
   {
@@ -39,7 +39,7 @@ local objects = {
     name    = "barrel",
     mesh    = "barrel.obj",
     textures = { tAlbedo = "barrel.png", tSpecular = "barrelS.png", tNormal = "barrelN.png" },
-    shader  = "normal.glsl"
+    shader  = "shaders/normal.glsl"
   },
   {
     translation = { 8, 1, 0 },
@@ -47,7 +47,7 @@ local objects = {
     name    = "crate",
     mesh    = "crate.obj",
     textures = { tAlbedo = "crate.png", tNormal = "crateN.png" },
-    shader  = "normal.glsl",
+    shader  = "shaders/normal.glsl",
   },
   {
     translation = { 3, 1.7, -3 },
@@ -55,7 +55,7 @@ local objects = {
     name    = "fox",
     mesh    = "fox.obj",
     textures = { tAlbedo = "fox.png" },
-    shader  = "opaque.glsl",
+    shader  = "shaders/opaque.glsl",
     material = { uColor = { 1.0, 1.0, 1.0 } }
   },
   {
@@ -64,7 +64,7 @@ local objects = {
     name    = "fern",
     mesh    = "fern.obj",
     textures = { tAlbedo = "fern.png" },
-    shader  = "cutout.glsl",
+    shader  = "shaders/cutout.glsl",
     material = { uCutoff = 0.5 }
   },
 }
@@ -78,7 +78,7 @@ for x=-3,3 do
         name    = "pine " .. x .. "_" .. z,
         mesh    = "pine.obj",
         textures = { tAlbedo = "pine.png" },
-        shader  = "cutout.glsl",
+        shader  = "shaders/cutout.glsl",
         material = { uCutoff = 0.5 }
       })
     end

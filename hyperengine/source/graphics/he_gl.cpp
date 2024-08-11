@@ -1,6 +1,7 @@
 #include "he_gl.hpp"
 
-#include <iostream>
+#include "he_rdoc.hpp"
+#include <spdlog/spdlog.h>
 
 namespace hyperengine {
 #define HE_IMPL_EXPAND(x) case x: return #x
@@ -41,7 +42,36 @@ namespace hyperengine {
 #undef HE_IMPL_EXPAND
 
 	void glMessageCallback(GLenum source, GLenum type, GLuint id, GLenum severity, GLsizei length, GLchar const* message, void const* user_param) {
-		std::cout << glConstantToString(source) << ", " << glConstantToString(type) << ", " << glConstantToString(severity) << ", " << id << ": " << message << '\n';
+
+		// Pixel-path performance warning: Pixel transfer is synchronized with 3D rendering.
+		// This occurs when frame capturing, if we're frame capturing, lets ignore this message
+		if (id == 0x20052 && hyperengine::rdoc::isFrameCapturing()) return;
+
+		spdlog::log(spdlog::level::trace, "{}", 20);
+
+		spdlog::level::level_enum level;
+
+		switch (severity) {
+		case GL_DEBUG_SEVERITY_NOTIFICATION:
+			level = spdlog::level::info;
+			break;
+		case GL_DEBUG_SEVERITY_LOW:
+			level = spdlog::level::warn;
+			break;
+		case GL_DEBUG_SEVERITY_MEDIUM:
+			level = spdlog::level::warn;
+			break;
+		case GL_DEBUG_SEVERITY_HIGH:
+			level = spdlog::level::err;
+			break;
+		default:
+			level = spdlog::level::err;
+			break;
+		}
+
+		spdlog::log(level, "{}, {}, {}, {}: {}", glConstantToString(source), glConstantToString(type), glConstantToString(severity), id, message);
+
+
 		// hyperengine::breakpointIfDebugging();
 	}
 
