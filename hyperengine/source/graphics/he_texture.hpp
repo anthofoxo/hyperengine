@@ -56,6 +56,7 @@ namespace hyperengine {
 		~Texture() noexcept;
 
 		inline std::string const& origin() const { return mOrigin; }
+		inline GLuint target() const { return mTarget; }
 		inline GLuint handle() const { return mHandle; }
 
 		void upload(UploadInfo const& info);

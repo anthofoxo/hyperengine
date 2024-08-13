@@ -424,25 +424,27 @@ struct LightComponent final {
 struct UniformEngineData final {
 	glm::mat4 projection;   
 	glm::mat4 view;
-	glm::mat4 lightmat;
+	glm::mat4 lightmat[4];
 	glm::vec3 skyColor;
 	float farPlane;
 	glm::vec3 sunDirection;
 	float gTime;
 	glm::vec3 sunColor;
 	float UNNAMABLE;
+	glm::vec4 cascadeDistances;
 };
 
 // Assert layout matches glsl std140
-static_assert(sizeof(UniformEngineData) == 240);
-static_assert(offsetof(UniformEngineData, projection)   ==   0);
-static_assert(offsetof(UniformEngineData, view)         ==  64);
-static_assert(offsetof(UniformEngineData, lightmat)     == 128);
-static_assert(offsetof(UniformEngineData, skyColor)     == 192);
-static_assert(offsetof(UniformEngineData, farPlane)     == 204);
-static_assert(offsetof(UniformEngineData, sunDirection) == 208);
-static_assert(offsetof(UniformEngineData, gTime)        == 220);
-static_assert(offsetof(UniformEngineData, sunColor)     == 224);
+static_assert(sizeof(UniformEngineData) == 448);
+static_assert(offsetof(UniformEngineData, projection)       ==   0);
+static_assert(offsetof(UniformEngineData, view)             ==  64);
+static_assert(offsetof(UniformEngineData, lightmat)         == 128);
+static_assert(offsetof(UniformEngineData, skyColor)         == 384);
+static_assert(offsetof(UniformEngineData, farPlane)         == 396);
+static_assert(offsetof(UniformEngineData, sunDirection)     == 400);
+static_assert(offsetof(UniformEngineData, gTime)            == 412);
+static_assert(offsetof(UniformEngineData, sunColor)         == 416);
+static_assert(offsetof(UniformEngineData, cascadeDistances) == 432);
 
 struct Views final {
 	bool hierarchy = true;
@@ -579,6 +581,22 @@ struct Engine final {
 		glBindBuffer(GL_UNIFORM_BUFFER, 0);
 		glBindBufferBase(GL_UNIFORM_BUFFER, 0, mEngineUniformBuffer);
 		genShadowmap();
+
+		mCascades[0].mShadowMapOffset   = 16.0f;
+		mCascades[0].mShadowMapNear     = 0.01f;
+		mCascades[0].mShadowMapDistance = 8.0f;
+
+		mCascades[1].mShadowMapOffset   = 8.0f;
+		mCascades[1].mShadowMapNear     = 8.0f;
+		mCascades[1].mShadowMapDistance = 16.0f;
+
+		mCascades[2].mShadowMapOffset   = 8.0f;
+		mCascades[2].mShadowMapNear     = 16.0f;
+		mCascades[2].mShadowMapDistance = 32.0f;
+
+		mCascades[3].mShadowMapOffset   = 8.0f;
+		mCascades[3].mShadowMapNear     = 32.0f;
+		mCascades[3].mShadowMapDistance = 64.0f;
 	}
 
 	void genShadowmap() {
@@ -588,11 +606,12 @@ struct Engine final {
 		mFramebufferShadowDepth = {{
 				.width = mShadowMapSize,
 				.height = mShadowMapSize,
+				.depth = 4,
 				.format = hyperengine::PixelFormat::kD24,
 				.minFilter = kNearest,
 				.magFilter = kNearest,
 				.wrap = kClampBorder,
-				.label = "shadow depth"
+				.label = "shadow depth array"
 			}};
 
 		std::array<hyperengine::Framebuffer::Attachment, 1> attachments{
@@ -1226,38 +1245,46 @@ struct Engine final {
 			glViewport(0, 0, mShadowMapSize, mShadowMapSize);
 			glClear(GL_DEPTH_BUFFER_BIT);
 
-			// Calculate center point of adjusted view frustum
-			auto adjustedFrustum = glm::perspective(glm::radians(cameraCamera.fov), static_cast<float>(mViewportSize.x) / static_cast<float>(mViewportSize.y), mShadowMapNear, mShadowMapDistance);
-			auto corners = getSystemSpaceNdcExtremes(adjustedFrustum * glm::inverse(cameraTransform.get()));
-			glm::vec3 center = glm::vec3(0, 0, 0);
-			for (const auto& v : corners)
-				center += glm::vec3(v);
-			center /= static_cast<float>(corners.size());
+			// For each cascade
+			for (int i = 0; i < 4; ++i) {
+				// Calculate center point of adjusted view frustum
+				auto adjustedFrustum = glm::perspective(glm::radians(cameraCamera.fov), static_cast<float>(mViewportSize.x) / static_cast<float>(mViewportSize.y), mCascades[i].mShadowMapNear, mCascades[i].mShadowMapDistance);
+				auto corners = getSystemSpaceNdcExtremes(adjustedFrustum * glm::inverse(cameraTransform.get()));
+				glm::vec3 center = glm::vec3(0, 0, 0);
+				for (const auto& v : corners)
+					center += glm::vec3(v);
+				center /= static_cast<float>(corners.size());
 
-			// Sun view matrix
-			glm::mat4 lightView = glm::lookAt(-sunDirection + center, center, glm::vec3(0.0f, 1.0f, 0.0f));
+				// Sun view matrix
+				glm::mat4 lightView = glm::lookAt(-sunDirection + center, center, glm::vec3(0.0f, 1.0f, 0.0f));
 
-			glm::vec3 min = glm::vec3(std::numeric_limits<float>::max());
-			glm::vec3 max = glm::vec3(std::numeric_limits<float>::lowest());
+				glm::vec3 min = glm::vec3(std::numeric_limits<float>::max());
+				glm::vec3 max = glm::vec3(std::numeric_limits<float>::lowest());
 
-			for (const auto& v : corners) {
-				const auto trf = lightView * glm::vec4(v, 1.0f);
-				min.x = glm::min(min.x, trf.x);
-				max.x = glm::max(max.x, trf.x);
-				min.y = glm::min(min.y, trf.y);
-				max.y = glm::max(max.y, trf.y);
-				min.z = glm::min(min.z, trf.z);
-				max.z = glm::max(max.z, trf.z);
+				for (const auto& v : corners) {
+					const auto trf = lightView * glm::vec4(v, 1.0f);
+					min.x = glm::min(min.x, trf.x);
+					max.x = glm::max(max.x, trf.x);
+					min.y = glm::min(min.y, trf.y);
+					max.y = glm::max(max.y, trf.y);
+					min.z = glm::min(min.z, trf.z);
+					max.z = glm::max(max.z, trf.z);
+				}
+
+				min.z -= mCascades[i].mShadowMapOffset;
+
+				glm::mat4 lightProjection = glm::ortho(min.x, max.x, min.y, max.y, min.z, max.z);
+
+				mUniformEngineData.lightmat[i] = lightProjection * lightView;
+
+				mUniformEngineData.cascadeDistances[i] = mCascades[i].mShadowMapDistance;
 			}
 
-			min.z -= mShadowMapOffset;
-
-			glm::mat4 lightProjection = glm::ortho(min.x, max.x, min.y, max.y, min.z, max.z);
+			
 
 			// Update engine uniform data
 			mUniformEngineData.projection = cameraProjection;
 			mUniformEngineData.view = glm::inverse(cameraTransform.get());
-			mUniformEngineData.lightmat = lightProjection * lightView;
 			mUniformEngineData.skyColor = mSkyColor;
 			mUniformEngineData.farPlane = cameraCamera.clippingPlanes[1];
 			mUniformEngineData.sunDirection = sunDirection;
@@ -1355,12 +1382,19 @@ struct Engine final {
 
 		drawUi();
 
-		if (ImGui::Begin("Passes")) {
-			ImGui::Image((void*)(uintptr_t)mFramebufferShadowDepth.handle(), { 256, 256 }, { 0, 1 }, { 1, 0 });
-			ImGui::DragFloat("ShadowMap Offset", &mShadowMapOffset);
+		if (ImGui::Begin("Shadowmap pass")) {
+			for (auto& ref : mCascades) {
+				ImGui::PushID(&ref);
+				ImGui::Separator();
 
-			ImGui::DragFloat("ShadowMap Near", &mShadowMapNear);
-			ImGui::DragFloat("ShadowMap Distance", &mShadowMapDistance);
+				ImGui::DragFloat("ShadowMap Offset", &ref.mShadowMapOffset);
+				ImGui::DragFloat("ShadowMap Near", &ref.mShadowMapNear);
+				ImGui::DragFloat("ShadowMap Distance", &ref.mShadowMapDistance);
+
+				ImGui::PopID();
+
+			}
+
 
 			if(ImGui::DragInt("ShadowMap Size", &mShadowMapSize, 1.0f, 32, 16384))
 				genShadowmap();
@@ -1461,9 +1495,14 @@ struct Engine final {
 
 	hyperengine::Window mWindow;
 
-	float mShadowMapOffset = 16.0f;
-	float mShadowMapNear = 0.1f;
-	float mShadowMapDistance = 64.0f;
+
+	struct ShadowCascadeSettings final {
+		float mShadowMapOffset = 16.0f;
+		float mShadowMapNear = 0.1f;
+		float mShadowMapDistance = 64.0f;
+	};
+
+	ShadowCascadeSettings mCascades[4];
 	int mShadowMapSize = 2048;
 	hyperengine::Framebuffer mFramebufferShadow;
 	hyperengine::Texture mFramebufferShadowDepth;

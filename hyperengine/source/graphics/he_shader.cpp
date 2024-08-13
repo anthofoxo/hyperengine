@@ -33,12 +33,17 @@ namespace hyperengine {
 	ShaderProgram::ShaderProgram(CreateInfo const& info) {
 		std::string source = std::string(info.source);
 
+		bool geomEnabled = false;
+
 		// Match engine pragmas
 		{
 			std::regex regex("@(\\w+)\\s+(\\w+)\\s*=\\s*(\\w+)");
 
 			for (std::sregex_iterator i = std::sregex_iterator(source.begin(), source.end(), regex); i != std::sregex_iterator(); ++i) {
 				std::smatch match = *i;
+
+				if (match[1] == "stage" && match[2] == "geom")
+					geomEnabled = std::stoi(match[3]);
 
 				if (match[1] == "property" && match[2] == "cull")
 					mCull = std::stoi(match[3]);
@@ -49,12 +54,21 @@ namespace hyperengine {
 			source = std::regex_replace(source, regex, "// ENGINE PRAGMA APPLIED // $&");
 		}
 
+
+
 		char error[256];
 		char* vertSource = stb_include_string(source.data(), (char*)"#version 330 core\n#define VERT", (char*)"./shaders", nullptr, error);
 		char* fragSource = stb_include_string(source.data(), (char*)"#version 330 core\n#define FRAG", (char*)"./shaders", nullptr, error);
 
 		GLuint vert = makeShader(GL_VERTEX_SHADER, vertSource, static_cast<int>(strlen(vertSource)), mErrors);
 		GLuint frag = makeShader(GL_FRAGMENT_SHADER, fragSource, static_cast<int>(strlen(fragSource)), mErrors);
+		GLuint geom = 0;
+
+		if (geomEnabled) {
+			char* geomSource = stb_include_string(source.data(), (char*)"#version 330 core\n#define GEOM", (char*)"./shaders", nullptr, error);
+			geom = makeShader(GL_GEOMETRY_SHADER, geomSource, static_cast<int>(strlen(geomSource)), mErrors);
+			free(geomSource);
+		}
 
 		free(vertSource);
 		free(fragSource);
@@ -62,11 +76,14 @@ namespace hyperengine {
 		mHandle = glCreateProgram();
 		glAttachShader(mHandle, vert);
 		glAttachShader(mHandle, frag);
+		if (geomEnabled) glAttachShader(mHandle, geom);
 		glLinkProgram(mHandle);
+		if (geomEnabled) glDetachShader(mHandle, geom);
 		glDetachShader(mHandle, vert);
 		glDetachShader(mHandle, frag);
 		glDeleteShader(vert);
 		glDeleteShader(frag);
+		if (geomEnabled) glDeleteShader(geom);
 
 		GLint param;
 		glGetProgramiv(mHandle, GL_INFO_LOG_LENGTH, &param);
@@ -118,7 +135,7 @@ namespace hyperengine {
 					mUniforms.insert(std::make_pair(std::string(uniformName.get(), length), Uniform(location, UniformType(type), offset, blockIndex)));
 
 					// Automatically assign opaques
-					if (type == GL_SAMPLER_2D) {
+					if (type == GL_SAMPLER_2D || type == GL_SAMPLER_2D_ARRAY ) {
 						glUniform1i(location, opaqueAssignment);
 						mOpaqueAssignments[std::string(uniformName.get(), length)] = opaqueAssignment;
 						++opaqueAssignment;

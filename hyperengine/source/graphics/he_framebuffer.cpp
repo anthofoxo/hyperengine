@@ -52,7 +52,7 @@ namespace hyperengine {
 				auto attachment = texrb.attachment;
 
 				std::visit(hyperengine::Visitor{
-					[attachment](hyperengine::Texture& v) { glFramebufferTexture2D(GL_FRAMEBUFFER, attachment, GL_TEXTURE_2D, v.handle(), 0); },
+					[attachment](hyperengine::Texture& v) { glFramebufferTexture2D(GL_FRAMEBUFFER, attachment, v.target(), v.handle(), 0); },
 					[attachment](hyperengine::Renderbuffer& v) { glFramebufferRenderbuffer(GL_FRAMEBUFFER, attachment, GL_RENDERBUFFER, v.handle()); },
 				}, texrb.source);
 			}

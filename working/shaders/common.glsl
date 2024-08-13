@@ -15,12 +15,13 @@
 layout(std140) uniform EngineData {
     mat4 gProjection;
     mat4 gView;
-    mat4 gLightMat;
+    mat4 gLightMat[4];
     vec3 gSkyColor;
     float gFarPlane;
     vec3 gSunDirection;
     float gTime;
     vec3 gSunColor;
+    vec4 gCascadeDistances;
 };
 
 float saturate(float value) {
@@ -87,26 +88,27 @@ float random(vec2 st) {
 }
 
 #ifdef FRAG
-float _shadowCalculation(sampler2D samp, vec4 fragPosLightSpace, vec3 normal, vec3 sunDirection) {
+float _shadowCalculation(int layer, sampler2DArray samp, vec4 fragPosLightSpace, vec3 normal, vec3 sunDirection) {
     vec3 projCoords = fragPosLightSpace.xyz / fragPosLightSpace.w;
     projCoords = projCoords * 0.5 + 0.5;
     
      if(projCoords.z > 1.0)
         return 0.0;
-    
+
     float currentDepth = projCoords.z;
     float bias = max(0.002 * (1.0 - dot(normal, -sunDirection)), 0.0);
 
 #ifdef FAST
-    float pcfDepth = texture(samp, projCoords.xy).r;
+    float pcfDepth = texture(samp, vec3(projCoords.xy, float(layer))).r;
     return currentDepth - bias > pcfDepth ? 1.0 : 0.0;
 #else
-    vec2 texelSize = 1.0 / textureSize(samp, 0);  
+    vec2 texelSize = 1.0 / textureSize(samp, 0).xy;  
     float shadow = 0.0;
     vec2 offset = vec2(random((gl_FragCoord.xy) + gTime * 0.0199814), random(gl_FragCoord.yx - gTime * 0.074115)) * 2.0 - 1.0;
     for(int y = -1; y <= 1; ++y)
         for(int x = -1; x <= 1; ++x) {
-            float pcfDepth = texture(samp, projCoords.xy + (vec2(x, y) + offset) * texelSize).r;
+            vec2 xySampleVal = projCoords.xy + (vec2(x, y) + offset) * texelSize;
+            float pcfDepth = texture(samp, vec3(xySampleVal, float(layer))).r;
             shadow += currentDepth - bias > pcfDepth ? 1.0 : 0.0;
         }
     
