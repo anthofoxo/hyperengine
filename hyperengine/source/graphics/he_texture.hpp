@@ -28,7 +28,7 @@ namespace hyperengine {
 		};
 
 		struct CreateInfo final {
-			GLsizei width = 0, height = 0;
+			GLsizei width = 0, height = 0, depth = 0;
 			PixelFormat format = PixelFormat::kRgba8;
 			FilterMode minFilter = FilterMode::kLinear;
 			FilterMode magFilter = FilterMode::kLinear;
@@ -40,9 +40,9 @@ namespace hyperengine {
 		};
 
 		struct UploadInfo final {
-			GLint xoffset, yoffset;
-			GLsizei width, height;
-			PixelFormat format;
+			GLint xoffset = 0, yoffset = 0, zoffset = 0;
+			GLsizei width = 0, height = 0, depth = 0;
+			PixelFormat format = PixelFormat::kRgba8;
 			void const* pixels = nullptr;
 			bool mips = false;
 		};
@@ -62,6 +62,7 @@ namespace hyperengine {
 		void bind(GLuint unit);
 	private:
 		std::string mOrigin;
+		GLenum mTarget = 0;
 		GLuint mHandle = 0;
 	};
 }

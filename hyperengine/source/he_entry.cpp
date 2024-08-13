@@ -605,6 +605,11 @@ struct Engine final {
 	void run() {
 		init();
 
+		uint32_t glfwExtensionCount = 0;
+		const char** glfwExtensions;
+
+		glfwExtensions = glfwGetRequiredInstanceExtensions(&glfwExtensionCount);
+
 		glGenVertexArrays(1, &mEmptyVao);
 
 		while (mRunning) {
@@ -1501,8 +1506,10 @@ int main(int argc, char* argv[]) {
 	TracySetProgramName("HyperEngine");
 	spdlog::set_level(spdlog::level::trace);
 	hyperengine::setupRenderDoc(true);
+
 	Engine engine;
 	engine.run();
+
 	spdlog::shutdown();
     return 0;
 }

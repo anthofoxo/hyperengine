@@ -3,8 +3,28 @@
 #include "he_gl.hpp"
 #include <glm/gtc/type_ptr.hpp>
 
+#include <spdlog/spdlog.h>
+
 namespace hyperengine {
+	namespace {
+		GLuint getBindingState(GLenum target) {
+			GLuint param;
+
+			if (target == GL_TEXTURE_2D)
+				glGetIntegerv(GL_TEXTURE_BINDING_2D, (GLint*)&param);
+			else
+				glGetIntegerv(GL_TEXTURE_BINDING_2D_ARRAY, (GLint*)&param);
+
+			return param;
+		}
+	}
+
 	Texture::Texture(CreateInfo const& info) {
+		if (info.depth > 0)
+			mTarget = GL_TEXTURE_2D_ARRAY;
+		else
+			mTarget = GL_TEXTURE_2D;		
+
 		using enum FilterMode;
 		int maxLevel = 0;
 		float maxAnisotropy = 0.0f;
@@ -17,40 +37,51 @@ namespace hyperengine {
 		}
 
 		if (GLAD_GL_ARB_direct_state_access) {
-			glCreateTextures(GL_TEXTURE_2D, 1, &mHandle);
+			glCreateTextures(mTarget, 1, &mHandle);
 			glTextureParameteri(mHandle, GL_TEXTURE_MIN_FILTER, static_cast<GLenum>(info.minFilter));
 			glTextureParameteri(mHandle, GL_TEXTURE_MAG_FILTER, static_cast<GLenum>(info.magFilter));
 			glTextureParameteri(mHandle, GL_TEXTURE_WRAP_S, static_cast<GLenum>(info.wrap));
 			glTextureParameteri(mHandle, GL_TEXTURE_WRAP_T, static_cast<GLenum>(info.wrap));
 			glTextureParameteri(mHandle, GL_TEXTURE_MAX_LEVEL, maxLevel);
 			glTextureParameterfv(mHandle, GL_TEXTURE_BORDER_COLOR, glm::value_ptr(info.border));
-			if(maxAnisotropy > 0.0f)
+			if (maxAnisotropy > 0.0f)
 				glTextureParameterf(mHandle, GL_TEXTURE_MAX_ANISOTROPY, maxAnisotropy);
-			glTextureStorage2D(mHandle, maxLevel + 1, pixelFormatToInternalFormat(info.format), info.width, info.height);
+
+			if (info.depth > 0)
+				glTextureStorage3D(mHandle, maxLevel + 1, pixelFormatToInternalFormat(info.format), info.width, info.height, info.depth);
+			else
+				glTextureStorage2D(mHandle, maxLevel + 1, pixelFormatToInternalFormat(info.format), info.width, info.height);
 		}
 		else {
 			// save state
-			GLuint param;
-			glGetIntegerv(GL_TEXTURE_BINDING_2D, (GLint*)&param);
+			GLuint param = getBindingState(mTarget);
 
 			glGenTextures(1, &mHandle);
-			glBindTexture(GL_TEXTURE_2D, mHandle);
-			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, static_cast<GLenum>(info.minFilter));
-			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, static_cast<GLenum>(info.magFilter));
-			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, static_cast<GLenum>(info.wrap));
-			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, static_cast<GLenum>(info.wrap));
-			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, maxLevel);
-			glTexParameterfv(GL_TEXTURE_2D, GL_TEXTURE_BORDER_COLOR, glm::value_ptr(info.border));
+			glBindTexture(mTarget, mHandle);
+			glTexParameteri(mTarget, GL_TEXTURE_MIN_FILTER, static_cast<GLenum>(info.minFilter));
+			glTexParameteri(mTarget, GL_TEXTURE_MAG_FILTER, static_cast<GLenum>(info.magFilter));
+			glTexParameteri(mTarget, GL_TEXTURE_WRAP_S, static_cast<GLenum>(info.wrap));
+			glTexParameteri(mTarget, GL_TEXTURE_WRAP_T, static_cast<GLenum>(info.wrap));
+			glTexParameteri(mTarget, GL_TEXTURE_MAX_LEVEL, maxLevel);
+			glTexParameterfv(mTarget, GL_TEXTURE_BORDER_COLOR, glm::value_ptr(info.border));
 			if (maxAnisotropy > 0.0f)
-				glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MAX_ANISOTROPY, maxAnisotropy);
+				glTexParameterf(mTarget, GL_TEXTURE_MAX_ANISOTROPY, maxAnisotropy);
 
-			if (GLAD_GL_ARB_texture_storage)
-				glTexStorage2D(GL_TEXTURE_2D, maxLevel + 1, pixelFormatToInternalFormat(info.format), info.width, info.height);
-			else
-				glTexImage2D(GL_TEXTURE_2D, 0, pixelFormatToInternalFormat(info.format), info.width, info.height, 0, pixelFormatToFormat(info.format), pixelFormatToType(info.format), nullptr);
+			if (GLAD_GL_ARB_texture_storage) {
+				if (info.depth > 0)
+					glTexStorage3D(mTarget, maxLevel + 1, pixelFormatToInternalFormat(info.format), info.width, info.height, info.depth);
+				else
+					glTexStorage2D(mTarget, maxLevel + 1, pixelFormatToInternalFormat(info.format), info.width, info.height);
+			}
+			else {
+				if (info.depth > 0)
+					glTexImage3D(mTarget, 0, pixelFormatToInternalFormat(info.format), info.width, info.height, info.depth, 0, pixelFormatToFormat(info.format), pixelFormatToType(info.format), nullptr);
+				else
+					glTexImage2D(mTarget, 0, pixelFormatToInternalFormat(info.format), info.width, info.height, 0, pixelFormatToFormat(info.format), pixelFormatToType(info.format), nullptr);
+			}
 
 			// restore state
-			glBindTexture(GL_TEXTURE_2D, param);
+			glBindTexture(mTarget, param);
 		}
 
 		if (GLAD_GL_KHR_debug && !info.label.empty())
@@ -60,6 +91,7 @@ namespace hyperengine {
 	}
 
 	Texture& Texture::operator=(Texture&& other) noexcept {
+		std::swap(mTarget, other.mTarget);
 		std::swap(mHandle, other.mHandle);
 		std::swap(mOrigin, other.mOrigin);
 		return *this;
@@ -72,24 +104,30 @@ namespace hyperengine {
 
 	void Texture::upload(UploadInfo const& info) {
 		if (GLAD_GL_ARB_direct_state_access) {
-			glTextureSubImage2D(mHandle, 0, info.xoffset, info.yoffset, info.width, info.height, pixelFormatToFormat(info.format), pixelFormatToType(info.format), info.pixels);
+			if(info.depth > 0)
+				glTextureSubImage3D(mHandle, 0, info.xoffset, info.yoffset, info.zoffset, info.width, info.height, info.depth, pixelFormatToFormat(info.format), pixelFormatToType(info.format), info.pixels);
+			else
+				glTextureSubImage2D(mHandle, 0, info.xoffset, info.yoffset, info.width, info.height, pixelFormatToFormat(info.format), pixelFormatToType(info.format), info.pixels);
 
 			if (info.mips)
 				glGenerateTextureMipmap(mHandle);
 		}
 		else {
 			// save state
-			GLuint param;
-			glGetIntegerv(GL_TEXTURE_BINDING_2D, (GLint*)&param);
+			GLuint param = getBindingState(mTarget);
 
-			glBindTexture(GL_TEXTURE_2D, mHandle);
-			glTexSubImage2D(GL_TEXTURE_2D, 0, info.xoffset, info.yoffset, info.width, info.height, pixelFormatToFormat(info.format), pixelFormatToType(info.format), info.pixels);
+			glBindTexture(mTarget, mHandle);
+
+			if (info.depth > 0)
+				glTexSubImage3D(mTarget, 0, info.xoffset, info.yoffset, info.zoffset, info.width, info.height, info.depth, pixelFormatToFormat(info.format), pixelFormatToType(info.format), info.pixels);
+			else
+				glTexSubImage2D(mTarget, 0, info.xoffset, info.yoffset, info.width, info.height, pixelFormatToFormat(info.format), pixelFormatToType(info.format), info.pixels);
 
 			if (info.mips)
-				glGenerateMipmap(GL_TEXTURE_2D);
+				glGenerateMipmap(mTarget);
 
 			// restore state
-			glBindTexture(GL_TEXTURE_2D, param);
+			glBindTexture(mTarget, param);
 		}
 	}
 
@@ -99,7 +137,7 @@ namespace hyperengine {
 		}
 		else {
 			glActiveTexture(GL_TEXTURE0 + unit);
-			glBindTexture(GL_TEXTURE_2D, mHandle);
+			glBindTexture(mTarget, mHandle);
 		}
 	}
 }
