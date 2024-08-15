@@ -1,9 +1,6 @@
 #inject
 #include "common.glsl"
 
-// https://habr.com/en/articles/442924/
-
-
 uniform Material {
     vec4 uTiling;
 };
@@ -43,7 +40,11 @@ void main(void) {
 }
 #endif
 
-#define optimialTextureLookup textureNoTile
+#ifdef FAST
+#	define optimialTextureLookup texture
+#else
+#	define optimialTextureLookup textureNoTile
+#endif
 
 #ifdef FRAG
 void main(void) {
@@ -58,6 +59,7 @@ void main(void) {
 #ifdef FAST
     oColor = vec4(color0.rgb * bias.x + color1.rgb * bias.y + color2.rgb * bias.z + color3.rgb * bias.w, 1.0);
 #else
+    // See: https://habr.com/en/articles/442924/
     color0.a = dot(color0.rgb, vec3(0.299, 0.587, 0.114));
     color1.a = dot(color1.rgb, vec3(0.299, 0.587, 0.114));
     color2.a = dot(color2.rgb, vec3(0.299, 0.587, 0.114));

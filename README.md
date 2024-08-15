@@ -54,7 +54,7 @@ HyperEngine has a few dependencies listed below. If you cloned with submodules t
 * [stb_image v2.30](https://github.com/nothings/stb/blob/f7f20f39fe4f206c6f19e26ebfef7b261ee59ee4/stb_image.h)
 * [RenderDoc 1.6.0](https://renderdoc.org/docs/in_application_api.html)
 * [debug-trap](https://github.com/nemequ/portable-snippets/blob/84abba93ff3d52c87e08ba81de1cc6615a42b72e/debug-trap/debug-trap.h)
-* [ImGuiColorTextEdit 0a88824](https://github.com/BalazsJako/ImGuiColorTextEdit/tree/0a88824f7de8d0bd11d8419066caa7d3469395c4) +Local fixes
+* [ImGuiColorTextEdit 00c9fcb](https://github.com/santaclose/ImGuiColorTextEdit/tree/00c9fcb39e5dc82a4eefcf2e97f29e5e74381895) +Local fixes
 * [miniaudio v0.11.21](https://github.com/mackron/miniaudio/tree/4a5b74bef029b3592c54b6048650ee5f972c1a48)
 * [stb_vorbis v1.22](https://github.com/nothings/stb/blob/f75e8d1cad7d90d72ef7a4661f1b994ef78b4e31/stb_vorbis.c)
 * [tinyfiledialogs v3.18.2](https://sourceforge.net/p/tinyfiledialogs/code/ci/29c1b354d75825209adf8cc1979c425885a64d32/tree/)

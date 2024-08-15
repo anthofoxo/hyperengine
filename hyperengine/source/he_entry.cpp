@@ -494,8 +494,8 @@ struct Engine final {
 			mResourceManager.mTextures[std::string(kInternalTextureUvName)] = mInternalTextureUv;
 		}
 
-		mAcesProgram = mResourceManager.getShaderProgram("shaders/aces.glsl");
-		mShadowProgram = mResourceManager.getShaderProgram("shaders/shadow.glsl");
+		mAcesProgram = mResourceManager.getShaderProgram("shaders/aces.glsl", mFileErrors);
+		mShadowProgram = mResourceManager.getShaderProgram("shaders/shadow.glsl", mFileErrors);
 	}
 
 	void init() {
@@ -659,7 +659,7 @@ struct Engine final {
 					if (ImGui::BeginDragDropTarget()) {
 						if (ImGuiPayload const* payload = ImGui::AcceptDragDropPayload("FilesystemFile")) {
 							std::string path((char const*)payload->Data, payload->DataSize);
-							comp.shader = ptr->mResourceManager.getShaderProgram(path);
+							comp.shader = ptr->mResourceManager.getShaderProgram(path, ptr->mFileErrors);
 							comp.resetMaterial();
 						}
 						ImGui::EndDragDropTarget();
@@ -842,7 +842,6 @@ struct Engine final {
 				for (auto& [k, v] : mResourceManager.mShaders) {
 					if (ImGui::TreeNodeEx(k.c_str())) {
 						ImGui::LabelText("Strong refs", "%d", v.use_count());
-						ImGui::Checkbox("Editor enabled", &mResourceManager.mShaderEditor[k].enabled);
 
 						ImGui::TreePop();
 					}
@@ -913,7 +912,7 @@ struct Engine final {
 
 				lua_getfield(L, -1, "shader");
 				if (lua_isstring(L, -1))
-					meshRenderer.shader = mResourceManager.getShaderProgram(lua_tostring(L, -1));
+					meshRenderer.shader = mResourceManager.getShaderProgram(lua_tostring(L, -1), mFileErrors);
 				lua_pop(L, 1);
 
 				// Apply stored material information
@@ -1080,6 +1079,16 @@ struct Engine final {
 			}
 
 			if (ImGui::BeginMenu("Debug")) {
+				if (ImGui::MenuItem("Reload shaders")) {
+					
+					for (auto& [k, v] : mResourceManager.mShaders) {
+						if (std::shared_ptr<hyperengine::ShaderProgram> program = v.lock()) {
+							mFileErrors.erase(std::u8string((char8_t const*)k.c_str()));
+							mResourceManager.reloadShader(k, *program, mFileErrors);
+						}
+					}
+				}
+
 				if (ImGui::MenuItem("Capture Frame", nullptr, nullptr, hyperengine::isRenderDocRunning())) {
 					hyperengine::rdoc::triggerCapture();
 				}
@@ -1105,7 +1114,7 @@ struct Engine final {
 
 		hyperengine::getConsole().draw(&mViews.console);
 
-		mGuiFilesystem.draw(&mViews.filesystem, mResourceManager);
+		mGuiFilesystem.draw(&mViews.filesystem, mResourceManager, mTextEditors);
 
 		if (ImGui::Begin("Debug")) {
 			ImGui::SeparatorText("GPU Info");
@@ -1142,26 +1151,89 @@ struct Engine final {
 		}
 		ImGui::End();
 
-		for (auto& [k, v] : mResourceManager.mShaderEditor) {
-			if (v.enabled) {
-				if (ImGui::Begin(k.c_str(), &v.enabled, ImGuiWindowFlags_None)) {
-					if (ImGui::Button("Save and reload")) {
-						hyperengine::writeFile(k.c_str(), v.editor.GetText().data(), glm::max<size_t>(v.editor.GetText().size() - 1, 0));
+		if (!mFileErrors.empty()) {
+			if (ImGui::Begin("Errors")) {
+				if (ImGui::BeginTabBar("ErrorTabs", ImGuiTabBarFlags_Reorderable)) {
+					for (auto& [k, v] : mFileErrors) {
+						if (ImGui::BeginTabItem((char const*)k.c_str())) {
+							ImGui::PushStyleColor(ImGuiCol_Text, { 1.0f, 0.0f, 0.0f, 1.0f });
+							ImGui::TextWrapped("%s", v.c_str());
+							ImGui::PopStyleColor();
 
-						// If shader is in memory, reload it
-						auto it = mResourceManager.mShaders.find(k);
-						if (it != mResourceManager.mShaders.end()) {
-							if (std::shared_ptr<hyperengine::ShaderProgram> program = it->second.lock())
-								mResourceManager.reloadShader(k, *program);
+							ImGui::EndTabItem();
 						}
 					}
 
-					ImGui::PushFont(fonts["mono"]);
-					v.editor.Render(k.c_str());
-					ImGui::PopFont();
+					ImGui::EndTabBar();
 				}
-				ImGui::End();
 			}
+			ImGui::End();
+		}
+
+		if (!mTextEditors.empty()) {
+			bool opened = true;
+
+			ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, { 0, 0 });
+			ImGui::Begin("Text Editors", &opened, ImGuiWindowFlags_MenuBar);
+			ImGui::PopStyleVar();
+
+			{
+				bool saveCurrentDoc = false;
+
+				if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_S)) {
+					saveCurrentDoc = true;
+				}
+
+				if (ImGui::BeginMenuBar()) {
+					if (ImGui::BeginMenu("File")) {
+						if(ImGui::MenuItem("Save", ImGui::GetKeyChordName(ImGuiMod_Ctrl | ImGuiKey_S))) saveCurrentDoc = true;
+
+						ImGui::EndMenu();
+					}
+
+					ImGui::EndMenuBar();
+				}
+
+				if (ImGui::BeginTabBar("TextEditorsTabs", ImGuiTabBarFlags_Reorderable)) {
+
+					std::u8string toClose;
+
+					for (auto& [k, v] : mTextEditors) {
+						bool opened = true;
+
+						ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, { 0, 0 });
+
+						if (ImGui::BeginTabItem((char const*)k.c_str(), &opened)) {
+							ImGui::PushFont(fonts["mono"]);
+							v.Render((char const*)k.c_str());
+							ImGui::PopFont();
+
+							if (saveCurrentDoc) {
+								hyperengine::writeFile((char const*)k.c_str(), v.GetText().data(), v.GetText().size());
+								mGuiFilesystem.queueUpdate();
+							}
+
+							ImGui::EndTabItem();
+						}
+
+						ImGui::PopStyleVar();
+
+						if (!opened)
+							toClose = k;
+					}
+
+					if (!toClose.empty()) {
+						mTextEditors.erase(toClose);
+					}
+
+					ImGui::EndTabBar();
+				}
+
+			}
+			ImGui::End();
+
+			if (!opened)
+				mTextEditors.clear();
 		}
 
 		drawGuiResourceManager();
@@ -1491,6 +1563,9 @@ struct Engine final {
 	hyperengine::Renderbuffer mFramebufferDepth;
 	hyperengine::Texture mFramebufferColor;
 	glm::ivec2 mViewportSize{};
+
+	std::unordered_map<std::u8string, TextEditor> mTextEditors;
+	std::unordered_map<std::u8string, std::string> mFileErrors;
 
 	hyperengine::Framebuffer mPostFramebuffer;
 	hyperengine::Texture mPostFramebufferColor;
