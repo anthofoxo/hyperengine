@@ -48,6 +48,8 @@
 #include "graphics/he_shader.hpp"
 #include "graphics/he_renderbuffer.hpp"
 
+#include <format>
+
 #include <imgui.h>
 #include <backends/imgui_impl_glfw.h>
 #include <backends/imgui_impl_opengl3.h>
@@ -613,8 +615,11 @@ struct Engine final {
 				bool hasGameObject = drawComponentEditGui<GameObjectComponent, Engine>(mRegistry, mSelected, "Game Object", this, [](auto& comp, auto* ptr) {
 					imguiInputText("Name", comp.name);
 
-					imguiLabelText("Uuid", "%p", 100, comp.uuid);
-
+					imguiLabelText("Uuid", "%p", 100, (uint64_t)comp.uuid);
+					if (ImGui::SmallButton("Copy Uuid")) {
+						std::string formatted = std::format("0x{:016x}", (uint64_t)comp.uuid);
+						ImGui::SetClipboardText(formatted.c_str());
+					}
 
 					drawVec3Control("Translation", comp.transform.translation, 0.0f, false);
 
@@ -854,13 +859,14 @@ struct Engine final {
 	void loadScene(char const* path) {
 		editorOpNewScene();
 
-		{
-			entt::handle entity{ mRegistry, mRegistry.create() };
-			GameObjectComponent& gameObject = entity.emplace<GameObjectComponent>();
-			gameObject.transform.translation = glm::vec3(0, 1, 3);
-			gameObject.name = "MainCamera";
-			CameraComponent& camera = entity.emplace<CameraComponent>();
-		}
+		// Dont add camera, within the viewport we will use an internal camera, this will be used for the game runtime
+		//{
+		//	entt::handle entity{ mRegistry, mRegistry.create() };
+		//	GameObjectComponent& gameObject = entity.emplace<GameObjectComponent>();
+		//	gameObject.transform.translation = glm::vec3(0, 1, 3);
+		//	gameObject.name = "MainCamera";
+		//	CameraComponent& camera = entity.emplace<CameraComponent>();
+		//}
 
 		lua_State* L = luaL_newstate();
 
@@ -903,6 +909,15 @@ struct Engine final {
 					lua_getfield(L, -1, "name");
 					if (lua_isstring(L, -1)) {
 						gameObject.name = lua_tostring(L, -1);
+					}
+					lua_pop(L, 1);
+
+					lua_getfield(L, -1, "uuid");
+					if (lua_isinteger(L, -1)) {
+						gameObject.uuid = static_cast<uint64_t>(lua_tointeger(L, -1));
+					}
+					else {
+						spdlog::warn("object in scene file doesn'r provide uuid");
 					}
 					lua_pop(L, 1);
 
@@ -1625,17 +1640,17 @@ struct Engine final {
 					resizeFramebuffers(contentAvail);
 
 					// Defaults
-					Transform* cameraTransform =  nullptr;
-					CameraComponent* cameraCamera = nullptr;
+					Transform* cameraTransform =  &mEditorCameraTransform;
+					CameraComponent* cameraCamera = &mEditorCamera;
 					glm::vec3 sunDirection = glm::normalize(glm::vec3(0.0f, -1.0f, 0.01f));
 					glm::vec3 sunColor = glm::vec3(1.0f) * 3.0f;
 
-					// Find camera
-					for (auto&& [entity, gameObject, camera] : mRegistry.view<GameObjectComponent, CameraComponent>().each()) {
-						cameraTransform = &gameObject.transform;
-						cameraCamera = &camera;
-						break;
-					}
+					// Find camera // TODO: Add scene panel and use this to find cameras for that
+					//for (auto&& [entity, gameObject, camera] : mRegistry.view<GameObjectComponent, CameraComponent>().each()) {
+					//	cameraTransform = &gameObject.transform;
+					//	cameraCamera = &camera;
+					//	break;
+					//}
 
 					// Find sun
 					for (auto&& [entity, gameObject, light] : mRegistry.view<GameObjectComponent, LightComponent>().each()) {
@@ -1708,6 +1723,9 @@ struct Engine final {
 	}
 
 	hyperengine::Window mWindow;
+
+	Transform mEditorCameraTransform;
+	CameraComponent mEditorCamera;
 
 	hyperengine::gui::Filesystem mGuiFilesystem;
 

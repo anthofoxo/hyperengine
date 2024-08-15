@@ -302,13 +302,30 @@ static bool TokenizeLuaStyleNumber(const char* in_begin, const char* in_end, con
 
 	bool hasNumber = startsWithNumber;
 
-	while (p < in_end && (*p >= '0' && *p <= '9'))
-	{
-		hasNumber = true;
+	bool hasHex = false;
 
+	if (*p == 'x' || *p == 'X') {
+		hasHex = true;
 		p++;
 	}
 
+	if (hasHex) {
+		while (p < in_end && (*p >= '0' && *p <= '9' || *p >= 'a' && *p <= 'f' || *p >= 'A' && *p <= 'F'))
+		{
+			hasNumber = true;
+
+			p++;
+		}
+	}
+	else {
+		while (p < in_end && (*p >= '0' && *p <= '9'))
+		{
+			hasNumber = true;
+
+			p++;
+		}
+	}
+	
 	if (hasNumber == false)
 		return false;
 

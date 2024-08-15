@@ -102,6 +102,7 @@ namespace hyperengine::gui {
 
 								if (acceptable) {
 									TextEditor editor;
+									editor.SetTabSize(2);
 
 									if (extension == u8".lua")
 										editor.SetLanguageDefinition(TextEditor::LanguageDefinitionId::Lua);
