@@ -886,10 +886,143 @@ struct Engine final {
 			lua_pop(L, 1);  /* remove lib */
 		}
 
-
 		if (luaL_dofile(L, path) != LUA_OK) {
 			spdlog::error("Lua error: {}", lua_tostring(L, -1));
 		}
+		else {
+			int t = lua_gettop(L);
+			lua_pushnil(L);
+
+			// Iterate object list
+			while (lua_next(L, t) != 0) {
+				entt::entity entity = mRegistry.create();
+				GameObjectComponent& gameObject = mRegistry.emplace<GameObjectComponent>(entity); // Enforce all objects to have this component
+
+				lua_getfield(L, -1, "GameObject");
+				if (lua_istable(L, -1)) {
+					lua_getfield(L, -1, "name");
+					if (lua_isstring(L, -1)) {
+						gameObject.name = lua_tostring(L, -1);
+					}
+					lua_pop(L, 1);
+
+					lua_getfield(L, -1, "translation");
+					if (lua_istable(L, -1)) {
+						gameObject.transform.translation = hyperengine::luaToVec3(L);
+					}
+					lua_pop(L, 1);
+
+					lua_getfield(L, -1, "orientation");
+					if (lua_istable(L, -1)) {
+						gameObject.transform.orientation = std::bit_cast<glm::quat>(hyperengine::luaToVec4(L));
+					}
+					lua_pop(L, 1);
+
+					lua_getfield(L, -1, "scale");
+					if (lua_istable(L, -1)) {
+						gameObject.transform.scale = hyperengine::luaToVec3(L);
+					}
+					lua_pop(L, 1);
+				}
+				lua_pop(L, 1);
+
+				lua_getfield(L, -1, "MeshFilter");
+				if (lua_istable(L, -1)) {
+					auto& meshFilter = mRegistry.emplace<MeshFilterComponent>(entity);
+				
+					lua_getfield(L, -1, "resource");
+					if (lua_isstring(L, -1)) {
+						meshFilter.mesh = mResourceManager.getMesh(lua_tostring(L, -1));
+					}
+					lua_pop(L, 1);
+				}
+				lua_pop(L, 1);
+
+				lua_getfield(L, -1, "MeshRenderer");
+				if (lua_istable(L, -1)) {
+					auto& meshRenderer = mRegistry.emplace<MeshRendererComponent>(entity);
+
+					lua_getfield(L, -1, "shader");
+					if (lua_isstring(L, -1)) {
+						meshRenderer.shader = mResourceManager.getShaderProgram(lua_tostring(L, -1), mFileErrors);
+					}
+					lua_pop(L, 1);
+
+					if (meshRenderer.shader) {
+						meshRenderer.allocateMaterialBuffer();
+
+						lua_getfield(L, -1, "textures");
+						if (lua_istable(L, -1)) {
+							int textureTable = lua_gettop(L);
+							lua_pushnil(L);
+							while (lua_next(L, textureTable) != 0) {
+								auto it = meshRenderer.shader->opaqueAssignments().find(lua_tostring(L, -2));
+								if (it != meshRenderer.shader->opaqueAssignments().end()) {
+									meshRenderer.textures[it->second] = mResourceManager.getTexture(lua_tostring(L, -1));
+								}
+								lua_pop(L, 1);
+							}
+
+						}
+						lua_pop(L, 1);
+
+						lua_getfield(L, -1, "material");
+						if (lua_istable(L, -1)) {
+							int materialTable = lua_gettop(L);
+							lua_pushnil(L);
+
+							while (lua_next(L, materialTable) != 0) {
+								auto it = meshRenderer.shader->materialInfo().find(lua_tostring(L, -2));
+								if (it != meshRenderer.shader->materialInfo().end()) {
+									auto offset = it->second.offset;
+									auto type = it->second.type;
+
+									if (type == hyperengine::ShaderProgram::UniformType::kFloat && lua_isnumber(L, -1)) {
+										*((float*)(meshRenderer.data.data() + offset)) = static_cast<float>(lua_tonumber(L, -1));
+									}
+									else if (type == hyperengine::ShaderProgram::UniformType::kVec2f && lua_istable(L, -1)) {
+										*((glm::vec2*)(meshRenderer.data.data() + offset)) = hyperengine::luaToVec2(L);
+									}
+									else if (type == hyperengine::ShaderProgram::UniformType::kVec3f && lua_istable(L, -1)) {
+										*((glm::vec3*)(meshRenderer.data.data() + offset)) = hyperengine::luaToVec3(L);
+									}
+									else if (type == hyperengine::ShaderProgram::UniformType::kVec4f && lua_istable(L, -1)) {
+										*((glm::vec4*)(meshRenderer.data.data() + offset)) = hyperengine::luaToVec4(L);
+									}
+									else
+										spdlog::warn("Unsupported uniform type");
+								}
+
+								lua_pop(L, 1);
+							}
+						}
+						lua_pop(L, 1);
+					}
+				}
+				lua_pop(L, 1);
+
+				lua_getfield(L, -1, "Light");
+				if (lua_istable(L, -1)) {
+					auto& light = mRegistry.emplace<LightComponent>(entity);
+
+					lua_getfield(L, -1, "color");
+					if (lua_istable(L, -1)) {
+						light.color = hyperengine::luaToVec3(L);
+					}
+					lua_pop(L, 1);
+
+					lua_getfield(L, -1, "strength");
+					if (lua_isnumber(L, -1)) {
+						light.strength = static_cast<float>(lua_tonumber(L, -1));
+					}
+					lua_pop(L, 1);
+				}
+				lua_pop(L, 1);
+
+				lua_pop(L, 1);
+			}
+		}
+#if 0
 		else {
 			int t = lua_gettop(L); // Table index
 			lua_pushnil(L); // First key
@@ -1000,6 +1133,7 @@ struct Engine final {
 				lua_pop(L, 1); // remove value
 			}
 		}
+#endif
 
 		lua_pop(L, 1); // Pop table
 
@@ -1179,14 +1313,24 @@ struct Engine final {
 
 			{
 				bool saveCurrentDoc = false;
+				bool saveAll = false;
 
 				if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_S)) {
 					saveCurrentDoc = true;
 				}
 
+				if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiMod_Shift | ImGuiKey_S)) {
+					saveAll = true;
+				}
+
+				int line = 0, column = 0, lineCount = 0;
+				bool overwriteEnabled = false;
+				std::string defName;
+
 				if (ImGui::BeginMenuBar()) {
 					if (ImGui::BeginMenu("File")) {
-						if(ImGui::MenuItem("Save", ImGui::GetKeyChordName(ImGuiMod_Ctrl | ImGuiKey_S))) saveCurrentDoc = true;
+						if (ImGui::MenuItem("Save", ImGui::GetKeyChordName(ImGuiMod_Ctrl | ImGuiKey_S))) saveCurrentDoc = true;
+						if (ImGui::MenuItem("Save All", ImGui::GetKeyChordName(ImGuiMod_Ctrl | ImGuiMod_Shift | ImGuiKey_S))) saveAll = true;
 
 						ImGui::EndMenu();
 					}
@@ -1194,7 +1338,7 @@ struct Engine final {
 					ImGui::EndMenuBar();
 				}
 
-				if (ImGui::BeginTabBar("TextEditorsTabs", ImGuiTabBarFlags_Reorderable)) {
+				if (ImGui::BeginTabBar("TextEditorsTabs", ImGuiTabBarFlags_Reorderable | ImGuiTabBarFlags_AutoSelectNewTabs)) {
 
 					std::u8string toClose;
 
@@ -1203,14 +1347,29 @@ struct Engine final {
 
 						ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, { 0, 0 });
 
-						if (ImGui::BeginTabItem((char const*)k.c_str(), &opened)) {
+						ImGuiTabItemFlags flags = ImGuiTabItemFlags_None;
+
+						if (mTextEditorsAdditionalState[k].undoIndexInDisc != v.GetUndoIndex())
+							flags |= ImGuiTabItemFlags_UnsavedDocument;
+
+						if (ImGui::BeginTabItem((char const*)k.c_str(), &opened, flags)) {
+
+							v.GetCursorPosition(line, column);
+							lineCount = v.GetLineCount();
+							overwriteEnabled = v.IsOverwriteEnabled();
+							defName = v.GetLanguageDefinitionName();
+
+							ImVec2 availContent = ImGui::GetContentRegionAvail();
+							availContent.y -= ImGui::GetFontSize() + ImGui::GetStyle().ItemSpacing.y * 2.0f;
+
 							ImGui::PushFont(fonts["mono"]);
-							v.Render((char const*)k.c_str());
+							v.Render((char const*)k.c_str(), false, availContent);
 							ImGui::PopFont();
 
 							if (saveCurrentDoc) {
 								hyperengine::writeFile((char const*)k.c_str(), v.GetText().data(), v.GetText().size());
 								mGuiFilesystem.queueUpdate();
+								mTextEditorsAdditionalState[k].undoIndexInDisc = v.GetUndoIndex();
 							}
 
 							ImGui::EndTabItem();
@@ -1220,15 +1379,23 @@ struct Engine final {
 
 						if (!opened)
 							toClose = k;
+
+						if (saveAll) {
+							hyperengine::writeFile((char const*)k.c_str(), v.GetText().data(), v.GetText().size());
+							mGuiFilesystem.queueUpdate();
+							mTextEditorsAdditionalState[k].undoIndexInDisc = v.GetUndoIndex();
+						}
 					}
 
 					if (!toClose.empty()) {
 						mTextEditors.erase(toClose);
+						mTextEditorsAdditionalState.erase(toClose);
 					}
 
 					ImGui::EndTabBar();
 				}
 
+				ImGui::Text("%6d/%-6d %6d lines | %s | %s", line + 1, column + 1, lineCount, overwriteEnabled ? "Ovr" : "Ins", defName.c_str());
 			}
 			ImGui::End();
 
@@ -1564,7 +1731,12 @@ struct Engine final {
 	hyperengine::Texture mFramebufferColor;
 	glm::ivec2 mViewportSize{};
 
+	struct ExtraState {
+		int undoIndexInDisc = 0;
+	};
+
 	std::unordered_map<std::u8string, TextEditor> mTextEditors;
+	std::unordered_map<std::u8string, ExtraState> mTextEditorsAdditionalState;
 	std::unordered_map<std::u8string, std::string> mFileErrors;
 
 	hyperengine::Framebuffer mPostFramebuffer;
