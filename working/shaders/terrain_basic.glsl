@@ -3,6 +3,7 @@
 
 // https://habr.com/en/articles/442924/
 
+
 uniform Material {
     vec4 uTiling;
 };
@@ -42,14 +43,17 @@ void main(void) {
 }
 #endif
 
+#define optimialTextureLookup textureNoTile
+
 #ifdef FRAG
 void main(void) {
     vec3 blendmapColor = texture(tBlendmap, vTexCoord).rgb;
     vec4 bias = vec4(1.0 - (blendmapColor.r + blendmapColor.g + blendmapColor.b), blendmapColor);
-    vec4 color0 = pow(textureNoTile(tAlbedo0, vTexCoord * uTiling.x), vec4(kGamma));
-    vec4 color1 = pow(textureNoTile(tAlbedo1, vTexCoord * uTiling.y), vec4(kGamma));
-    vec4 color2 = pow(textureNoTile(tAlbedo2, vTexCoord * uTiling.z), vec4(kGamma));
-    vec4 color3 = pow(textureNoTile(tAlbedo3, vTexCoord * uTiling.w), vec4(kGamma));
+
+    vec4 color0 = pow(optimialTextureLookup(tAlbedo0, vTexCoord * uTiling.x), vec4(kGamma));
+    vec4 color1 = pow(optimialTextureLookup(tAlbedo1, vTexCoord * uTiling.y), vec4(kGamma));
+    vec4 color2 = pow(optimialTextureLookup(tAlbedo2, vTexCoord * uTiling.z), vec4(kGamma));
+    vec4 color3 = pow(optimialTextureLookup(tAlbedo3, vTexCoord * uTiling.w), vec4(kGamma));
 
 #ifdef FAST
     oColor = vec4(color0.rgb * bias.x + color1.rgb * bias.y + color2.rgb * bias.z + color3.rgb * bias.w, 1.0);

@@ -5,12 +5,6 @@
 #	undef far
 #endif
 
-#ifdef _MSC_VER
-#	define HE_ALLOCATOR(size) _Ret_notnull_ _Post_writable_byte_size_(size) __declspec(allocator)
-#else
-#	define HE_ALLOCATOR(size)
-#endif
-
 #include <glad/gl.h>
 #include <GLFW/glfw3.h>
 
@@ -25,7 +19,12 @@
 #include <sstream>
 #include <regex>
 
+#include "gui/he_console.hpp"
+
 #include <debug_trap.h>
+
+#include "he_resourcemanager.hpp"
+#include "gui/he_filesystem.hpp"
 
 #define GLM_ENABLE_EXPERIMENTAL
 #include <glm/glm.hpp>
@@ -73,6 +72,10 @@
 
 #include <filesystem>
 
+#include <imgui_internal.h>
+
+#include <spdlog/sinks/base_sink.h>
+
 [[nodiscard]] HE_ALLOCATOR(count) void* operator new(std::size_t count)
 {
 	void* ptr = malloc(count);
@@ -90,6 +93,8 @@ void operator delete(void* ptr) noexcept {
 constexpr std::string_view kInternalTextureBlackName = "internal://black.png";
 constexpr std::string_view kInternalTextureWhiteName = "internal://white.png";
 constexpr std::string_view kInternalTextureUvName = "internal://uv.png";
+constexpr std::string_view kInternalTextureCheckerboardName = "internal://checkerboard.png";
+// !!! NOTICE !!! When adding to this list, make sure to update the definition inside gui/he_filesystem.hpp
 
 struct Transform final {
 	glm::vec3 translation{};
@@ -115,6 +120,8 @@ struct Transform final {
 	}
 };
 
+std::unordered_map<std::string, ImFont*> fonts;
+
 static void initImGui(hyperengine::Window& window) {
 	IMGUI_CHECKVERSION();
 	ImGui::CreateContext();
@@ -122,6 +129,16 @@ static void initImGui(hyperengine::Window& window) {
 	io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
 	io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
 	io.ConfigWindowsMoveFromTitleBarOnly = true;
+
+	ImFont* defaultFont = io.Fonts->AddFontDefault();
+	ImFont* regularFont = io.Fonts->AddFontFromFileTTF("NotoSans-Regular.ttf", 18.0f);
+	ImFont* boldFont = io.Fonts->AddFontFromFileTTF("NotoSans-Bold.ttf", 18.0f);
+	ImFont* monoFont = io.Fonts->AddFontFromFileTTF("NotoSansMono-Regular.ttf", 18.0f);
+	if (regularFont) io.FontDefault = regularFont;
+
+	fonts["regular"] = regularFont ? regularFont : defaultFont;
+	fonts["bold"] = boldFont ? boldFont : defaultFont;
+	fonts["mono"] = monoFont ? monoFont : defaultFont;
 
 	ImGui::StyleColorsDark();
 
@@ -164,187 +181,6 @@ static void imguiEndFrame() {
 		glfwMakeContextCurrent(backup_current_context);
 	}
 }
-
-auto glslShaderDef() {
-	TextEditor::LanguageDefinition langDef;
-
-	const char* const keywords[] = {
-		"void", "bool", "int", "uint", "float", "double",
-		"bvec2", "bvec3", "bvec4", "ivec2", "ivec3", "ivec4",
-		"uvec2", "uvec3", "uvec4", "vec2", "vec3", "vec4",
-		"dvec2", "dvec3", "dvec4", "mat2", "mat3", "mat4",
-		"mat2x2", "mat2x3", "mat2x4", "mat3x2", "mat3x3", "mat3x4",
-		"mat4x2", "mat4x3", "mat4x4",
-		"sampler2D", "in", "out", "const", "uniform", "layout", "std140",
-		"if", "else", "return"
-	};
-	for (auto& k : keywords)
-		langDef.mKeywords.insert(k);
-
-	char const* const hyperengineMacros[] = {
-		"INPUT", "OUTPUT", "VARYING", "VERT", "FRAG"
-	};
-
-	for (auto& k : hyperengineMacros) {
-		TextEditor::Identifier id;
-		id.mDeclaration = "HyperEngine macro";
-		langDef.mPreprocIdentifiers.insert(std::make_pair(std::string(k), id));
-	}
-
-	const char* const builtins[] = {
-		"acos", "acosh", "asin", "asinh", "atan", "atanh", "cos", "cosh", "degrees", "radians", "sin", "sinh", "tan", "tanh"
-		"abs", "ceil", "clamp", "dFdx", "dFdy", "exp", "exp2", "floor", "fma", "fract", "fwidth", "inversesqrt", "isinf", "isnan",
-		"log", "log2", "max", "min", "mix", "mod", "modf", "noise", "pow", "round", "roundEven", "sign", "smoothstep", "sqrt",
-		"step", "trunc", "floatBitsToInt", "intBitsToFloat", "gl_ClipDistance", "gl_FragCoord", "gl_FragDepth", "gl_FrontFacing",
-		"gl_InstanceID", "gl_InvocationID", "gl_Layer", "gl_PointCoord", "gl_PointSize", "gl_Position", "gl_PrimitiveID",
-		"gl_PrimitiveIDIn", "gl_SampleID", "gl_SampleMask", "gl_SampleMaskIn", "gl_SamplePosition", "gl_VertexID", "gl_ViewportIndex"
-		"cross", "distance", "dot", "equal", "faceforward", "length", "normalize", "notEqual", "reflect", "refract", "all", "any",
-		"greaterThan", "greaterThanEqual", "lessThan", "lessThanEqual", "not", "EmitVertex", "EndPrimitive", "texelFetch",
-		"texelFetchOffset", "texture", "textureGrad", "textureGradOffset", "textureLod", "textureLodOffset", "textureOffset",
-		"textureProj", "textureProjGrad", "textureProjGradOffset", "textureProjLod", "textureProjLodOffset", "textureProjOffset",
-		"textureSize", "determinant", "inverse", "matrixCompMult", "outerProduct", "transpose",
-	};
-	for (auto& k : builtins) {
-		TextEditor::Identifier id;
-		id.mDeclaration = "Built-in";
-		langDef.mIdentifiers.insert(std::make_pair(std::string(k), id));
-	}
-
-	langDef.mTokenRegexStrings.push_back(std::make_pair<std::string, TextEditor::PaletteIndex>("[ \\t]*#[ \\t]*[a-zA-Z_]+", TextEditor::PaletteIndex::Preprocessor));
-	langDef.mTokenRegexStrings.push_back(std::make_pair<std::string, TextEditor::PaletteIndex>("L?\\\"(\\\\.|[^\\\"])*\\\"", TextEditor::PaletteIndex::String));
-	langDef.mTokenRegexStrings.push_back(std::make_pair<std::string, TextEditor::PaletteIndex>("\\'\\\\?[^\\']\\'", TextEditor::PaletteIndex::CharLiteral));
-	langDef.mTokenRegexStrings.push_back(std::make_pair<std::string, TextEditor::PaletteIndex>("[+-]?([0-9]+([.][0-9]*)?|[.][0-9]+)([eE][+-]?[0-9]+)?[fF]?", TextEditor::PaletteIndex::Number));
-	langDef.mTokenRegexStrings.push_back(std::make_pair<std::string, TextEditor::PaletteIndex>("[+-]?[0-9]+[Uu]?[lL]?[lL]?", TextEditor::PaletteIndex::Number));
-	langDef.mTokenRegexStrings.push_back(std::make_pair<std::string, TextEditor::PaletteIndex>("0[0-7]+[Uu]?[lL]?[lL]?", TextEditor::PaletteIndex::Number));
-	langDef.mTokenRegexStrings.push_back(std::make_pair<std::string, TextEditor::PaletteIndex>("0[xX][0-9a-fA-F]+[uU]?[lL]?[lL]?", TextEditor::PaletteIndex::Number));
-	langDef.mTokenRegexStrings.push_back(std::make_pair<std::string, TextEditor::PaletteIndex>("[a-zA-Z_][a-zA-Z0-9_]*", TextEditor::PaletteIndex::Identifier));
-	langDef.mTokenRegexStrings.push_back(std::make_pair<std::string, TextEditor::PaletteIndex>("[\\[\\]\\{\\}\\!\\%\\^\\&\\*\\(\\)\\-\\+\\=\\~\\|\\<\\>\\?\\/\\;\\,\\.]", TextEditor::PaletteIndex::Punctuation));
-
-	langDef.mCommentStart = "/*";
-	langDef.mCommentEnd = "*/";
-	langDef.mSingleLineComment = "//";
-
-	langDef.mCaseSensitive = true;
-	langDef.mAutoIndentation = true;
-
-	langDef.mName = "GLSL";
-
-	return langDef;
-}
-
-struct TextEditorInfo {
-	TextEditor editor;
-	bool enabled = false;
-};
-
-struct ResourceManager final {
-	hyperengine::UnorderedStringMap<std::weak_ptr<hyperengine::Mesh>> mMeshes;
-	hyperengine::UnorderedStringMap<std::weak_ptr<hyperengine::Texture>> mTextures;
-	hyperengine::UnorderedStringMap<std::weak_ptr<hyperengine::ShaderProgram>> mShaders;
-
-	hyperengine::UnorderedStringMap<TextEditorInfo> mShaderEditor;
-
-	std::shared_ptr<hyperengine::Mesh> getMesh(std::string_view path) {
-		auto it = mMeshes.find(path);
-
-		if (it != mMeshes.end())
-			if (std::shared_ptr<hyperengine::Mesh> ptr = it->second.lock())
-				return ptr;
-
-		std::string pathStr(path);
-
-		auto optMesh = hyperengine::readMesh(pathStr.c_str());
-		if (!optMesh.has_value()) return nullptr;
-
-		std::shared_ptr<hyperengine::Mesh> mesh = std::make_shared<hyperengine::Mesh>(std::move(optMesh.value()));
-		mMeshes[std::move(pathStr)] = mesh;
-		return mesh;
-	}
-
-	std::shared_ptr<hyperengine::Texture> getTexture(std::string_view path) {
-		auto it = mTextures.find(path);
-
-		if (it != mTextures.end())
-			if (std::shared_ptr<hyperengine::Texture> ptr = it->second.lock())
-				return ptr;
-
-		std::string pathStr(path);
-
-		auto opt = hyperengine::readTextureImage(pathStr.c_str());
-		if (!opt.has_value()) return nullptr;
-
-		std::shared_ptr<hyperengine::Texture> texture = std::make_shared<hyperengine::Texture>(std::move(opt.value()));
-		mTextures[std::move(pathStr)] = texture;
-		return texture;
-	}
-
-	void reloadShader(std::string const& pathStr, hyperengine::ShaderProgram& program) {
-		auto shader = hyperengine::readFileString(pathStr.c_str());
-		if (!shader.has_value()) return;
-
-		// reload shader, will repopulate errors
-		program = {{ .source = shader.value(), .origin = pathStr }};
-
-		// Setup debug editor
-		std::unordered_map<int, std::set<std::string>> parsed;
-		std::regex match("[0-9]*\\(([0-9]+)\\)");
-
-		// On nvidia drivers, the program info log will include errors from all stages
-		if (!program.errors().empty()) {
-			for (auto const& error : program.errors()) {
-				std::vector<std::string> lines;
-				hyperengine::split(error, lines, '\n');
-
-				// Attempt to parse information from line
-				for (auto const& line : lines) {
-					auto words_begin = std::sregex_iterator(line.begin(), line.end(), match);
-					auto words_end = std::sregex_iterator();
-
-					for (std::sregex_iterator i = words_begin; i != words_end; ++i) {
-						std::smatch match = *i;
-
-						int lineMatch = std::stoi(match[1]);
-						if (lineMatch == 0) lineMatch = 1; // If no line, push error to top of file
-						parsed[lineMatch].insert(line);
-						break; //  Only care about the first match
-					}
-				}
-			}
-		}
-
-		TextEditor editor;
-		editor.SetLanguageDefinition(glslShaderDef());
-		editor.SetText(shader.value());
-		TextEditor::ErrorMarkers markers;
-		for (auto const& [k, v] : parsed) {
-			std::string str;
-			for (auto const& lineFromSet : v)
-				str += lineFromSet + '\n';
-
-			markers.insert(std::make_pair(k, str));
-		}
-		editor.SetErrorMarkers(markers);
-		bool opened = mShaderEditor[pathStr].enabled;
-		mShaderEditor[pathStr] = { editor, opened || !parsed.empty() };
-	}
-
-	std::shared_ptr<hyperengine::ShaderProgram> getShaderProgram(std::string_view path) {
-		auto it = mShaders.find(path);
-
-		if (it != mShaders.end())
-			if (std::shared_ptr<hyperengine::ShaderProgram> ptr = it->second.lock())
-				return ptr;
-
-		std::string pathStr(path);
-
-		hyperengine::ShaderProgram program;
-		reloadShader(pathStr, program);
-
-		std::shared_ptr<hyperengine::ShaderProgram> obj = std::make_shared<hyperengine::ShaderProgram>(std::move(program));
-		mShaders[std::move(pathStr)] = obj;
-		return obj;
-	}
-};
 
 struct GameObjectComponent final {
 	std::string name;
@@ -415,12 +251,6 @@ struct LightComponent final {
 	float strength = 3.0f;
 };
 
-#define CAT_(a, b) a ## b
-#define CAT(a, b) CAT_(a, b)
-#define VARNAME(Var) CAT(Var, __LINE__)
-#define UNNAMABLE VARNAME(_reserved)
-#define ARRAYSIZE(_array) ((int)(sizeof(_array) / sizeof(*(_array))))
-
 struct UniformEngineData final {
 	glm::mat4 projection;   
 	glm::mat4 view;
@@ -430,7 +260,7 @@ struct UniformEngineData final {
 	glm::vec3 sunDirection;
 	float gTime;
 	glm::vec3 sunColor;
-	float UNNAMABLE;
+	float HE_UNNAMABLE;
 };
 
 // Assert layout matches glsl std140
@@ -448,6 +278,8 @@ struct Views final {
 	bool hierarchy = true;
 	bool properties = true;
 	bool viewport = true;
+	bool console = true;
+	bool filesystem = true;
 	bool resourceManager = false;
 	bool imguiDemoWindow = false;
 	bool experimentAudio = false;
@@ -456,6 +288,8 @@ struct Views final {
 		ImGui::MenuItem("Hierarchy", nullptr, &hierarchy);
 		ImGui::MenuItem("Properties", nullptr, &properties);
 		ImGui::MenuItem("Viewport", nullptr, &viewport);
+		ImGui::MenuItem("Console", nullptr, &console);
+		ImGui::MenuItem("Filesystem", nullptr, &filesystem);
 		ImGui::MenuItem("Resource Manager", nullptr, &resourceManager);
 		ImGui::Separator();
 		ImGui::MenuItem("Dear ImGui Demo", nullptr, &imguiDemoWindow);
@@ -465,13 +299,30 @@ struct Views final {
 };
 
 template <class T, class UserPtr>
-bool drawComponentEditGui(entt::registry& registry, entt::entity entity, char const* name, UserPtr* ptr, void(*func)(T&, UserPtr*)) {
+bool drawComponentEditGui(entt::registry& registry, entt::entity entity, char const* name, UserPtr* ptr, void(*func)(T&, UserPtr*), bool canDeleteCompoent = true) {
 	if (entity == entt::null) return false;
 	T* component = registry.try_get<T>(entity);
 	if (!component) return false;
 
-	if (ImGui::CollapsingHeader(name))
+	bool opened = ImGui::CollapsingHeader(name);
+
+	bool removeComponent = false;
+	if (ImGui::BeginPopupContextItem()) {
+		if (ImGui::MenuItem("Delete Component", nullptr, nullptr, canDeleteCompoent)) {
+			removeComponent = true;
+			ImGui::CloseCurrentPopup();
+		}
+
+		ImGui::EndPopup();
+	}
+
+	if(opened)
 		func(*component, ptr);
+
+	if (removeComponent) {
+		registry.erase<T>(entity);
+		return false;
+	}
 
 	return true;
 }
@@ -490,8 +341,107 @@ static std::array<glm::vec3, 8> getSystemSpaceNdcExtremes(glm::mat4 const& matri
 	return corners;
 }
 
+void imguiInputText(char const* label, std::string& value, float columnWidth = 100.0f) {
+	ImGui::PushID(label);
+	ImGui::Columns(2, nullptr, false);
+	ImGui::SetColumnWidth(0, columnWidth);
+	ImGui::Text(label);
+	ImGui::NextColumn();
+	ImGui::PushItemWidth(ImGui::CalcItemWidth());
+	ImGui::InputText("##Text", &value);
+	ImGui::SameLine();
+	ImGui::PopItemWidth();
+	ImGui::Columns(1);
+	ImGui::PopID();
+}
+
+void imguiLabelText(char const* label, char const* fmt, float columnWidth = 100.0f, ...) {
+	va_list args;
+	va_start(args, fmt);
+	ImGui::PushID(label);
+	ImGui::Columns(2, nullptr, false);
+	ImGui::SetColumnWidth(0, columnWidth);
+	ImGui::Text(label);
+	ImGui::NextColumn();
+	ImGui::PushItemWidth(ImGui::CalcItemWidth());
+	ImGui::LabelTextV("##Text", fmt, args);
+	ImGui::SameLine();
+	ImGui::PopItemWidth();
+	ImGui::Columns(1);
+	ImGui::PopID();
+	va_end(args);
+}
+
+bool drawVec3Control(char const* label, glm::vec3& values, float resetValue = 0.0f, bool placeDummy = true, float columnWidth = 100.0f) {
+	bool edited = false;
+
+	ImGui::PushID(label);
+	ImGui::Columns(2, nullptr, false);
+
+	ImGui::SetColumnWidth(0, columnWidth);
+	ImGui::Text(label);
+	ImGui::NextColumn();
+
+	ImGui::PushMultiItemsWidths(3, ImGui::CalcItemWidth());
+	ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(0, 0));
+
+	float lineHeight = GImGui->Font->FontSize + GImGui->Style.FramePadding.y * 2.0f;
+	ImVec2 buttonSize(lineHeight + 3.0f, lineHeight);
+
+	ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.8f, 0.1f, 0.15f, 1.0f));
+	ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.9f, 0.2f, 0.2f, 1.0f));
+	ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.8f, 0.1f, 0.15f, 1.0f));
+	ImGui::PushFont(fonts["bold"]);
+	if (ImGui::Button("X", buttonSize)) { values.x = resetValue; edited = true; }
+	ImGui::PopFont();
+	ImGui::PopStyleColor(3);
+
+	ImGui::SameLine();
+	edited |= ImGui::DragFloat("##X", &values.x, 0.1f, 0.0f, 0.0f, "%.2f", 0);
+	ImGui::PopItemWidth();
+	ImGui::SameLine();
+
+	ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.2f, 0.7f, 0.2f, 1.0f));
+	ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.3f, 0.8f, 0.3f, 1.0f));
+	ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.2f, 0.7f, 0.2f, 1.0f));
+	ImGui::PushFont(fonts["bold"]);
+	if (ImGui::Button("Y", buttonSize)) { values.y = resetValue; edited = true; }
+	ImGui::PopFont();
+	ImGui::PopStyleColor(3);
+
+	ImGui::SameLine();
+	edited |= ImGui::DragFloat("##Y", &values.y, 0.1f, 0.0f, 0.0f, "%.2f", 0);
+	ImGui::PopItemWidth();
+	ImGui::SameLine();
+
+	ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.1f, 0.25f, 0.8f, 1.0f));
+	ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.2f, 0.35f, 0.9f, 1.0f));
+	ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.1f, 0.25f, 0.8f, 1.0f));
+	ImGui::PushFont(fonts["bold"]);
+	if (ImGui::Button("Z", buttonSize)) { values.z = resetValue; edited = true; }
+	ImGui::PopFont();
+	ImGui::PopStyleColor(3);
+
+	ImGui::SameLine();
+	edited |= ImGui::DragFloat("##Z", &values.z, 0.1f, 0.0f, 0.0f, "%.2f", 0);
+	ImGui::PopItemWidth();
+
+	ImGui::PopStyleVar();
+	ImGui::Columns(1);
+	if (placeDummy) ImGui::Dummy(ImGui::GetStyle().ItemSpacing);
+	ImGui::PopID();
+	return edited;
+};
+
+static bool canPerformGlobalBinding(ImGuiKeyChord chord) {
+	bool isRouted = ImGui::GetShortcutRoutingData(chord)->RoutingCurr != ImGuiKeyOwner_NoOwner;
+	return !isRouted && ImGui::IsKeyChordPressed(chord);
+}
+
 struct Engine final {
 	void createInternalTextures() {
+		mResourceManager.assertTextureLifetime(mResourceManager.getTexture("icons/file.png"));
+
 		using enum hyperengine::Texture::WrapMode;
 		using enum hyperengine::Texture::FilterMode;
 		{
@@ -508,6 +458,25 @@ struct Engine final {
 			mInternalTextureWhite = std::make_shared<hyperengine::Texture>(std::move(tex));
 			mResourceManager.mTextures[std::string(kInternalTextureWhiteName)] = mInternalTextureWhite;
 		}
+
+		{
+			uint8_t pixels[] = {
+				255, 255, 255, 255, 191, 191, 191, 255, 255, 255, 255, 255, 191, 191, 191, 255, 255, 255, 255, 255, 191, 191, 191, 255, 255, 255, 255, 255, 191, 191, 191, 255, 
+				191, 191, 191, 255, 255, 255, 255, 255, 191, 191, 191, 255, 255, 255, 255, 255, 191, 191, 191, 255, 255, 255, 255, 255, 191, 191, 191, 255, 255, 255, 255, 255,
+				255, 255, 255, 255, 191, 191, 191, 255, 255, 255, 255, 255, 191, 191, 191, 255, 255, 255, 255, 255, 191, 191, 191, 255, 255, 255, 255, 255, 191, 191, 191, 255,
+				191, 191, 191, 255, 255, 255, 255, 255, 191, 191, 191, 255, 255, 255, 255, 255, 191, 191, 191, 255, 255, 255, 255, 255, 191, 191, 191, 255, 255, 255, 255, 255,
+				255, 255, 255, 255, 191, 191, 191, 255, 255, 255, 255, 255, 191, 191, 191, 255, 255, 255, 255, 255, 191, 191, 191, 255, 255, 255, 255, 255, 191, 191, 191, 255,
+				191, 191, 191, 255, 255, 255, 255, 255, 191, 191, 191, 255, 255, 255, 255, 255, 191, 191, 191, 255, 255, 255, 255, 255, 191, 191, 191, 255, 255, 255, 255, 255,
+				255, 255, 255, 255, 191, 191, 191, 255, 255, 255, 255, 255, 191, 191, 191, 255, 255, 255, 255, 255, 191, 191, 191, 255, 255, 255, 255, 255, 191, 191, 191, 255,
+				191, 191, 191, 255, 255, 255, 255, 255, 191, 191, 191, 255, 255, 255, 255, 255, 191, 191, 191, 255, 255, 255, 255, 255, 191, 191, 191, 255, 255, 255, 255, 255,
+			};
+
+			hyperengine::Texture tex = { {.width = 8, .height = 8, .format = hyperengine::PixelFormat::kRgba8, .minFilter = kLinear, .magFilter = kNearest, .wrap = kRepeat, .label = kInternalTextureCheckerboardName, .origin = kInternalTextureCheckerboardName } };
+			tex.upload({ .xoffset = 0, .yoffset = 0, .width = 8, .height = 8, .format = hyperengine::PixelFormat::kRgba8, .pixels = pixels});
+			mInternalTextureCheckerboard = std::make_shared<hyperengine::Texture>(std::move(tex));
+			mResourceManager.mTextures[std::string(kInternalTextureCheckerboardName)] = mInternalTextureCheckerboard;
+		}
+
 		{
 			std::unique_ptr<uint8_t[]> pixels = std::make_unique<uint8_t[]>(256 * 256 * 4); // Large object, heap alloc this
 
@@ -547,19 +516,6 @@ struct Engine final {
 		glfwSetWindowUserPointer(mWindow.handle(), this);
 		glfwSetWindowCloseCallback(mWindow.handle(), [](GLFWwindow* window) {
 			static_cast<Engine*>(glfwGetWindowUserPointer(window))->mRunning = false;
-		});
-
-		glfwSetKeyCallback(mWindow.handle(), [](GLFWwindow* window, int key, int scancode, int action, int mods) {
-			if (action != GLFW_PRESS) return;
-
-			if (key == GLFW_KEY_O && mods == GLFW_MOD_CONTROL)
-				static_cast<Engine*>(glfwGetWindowUserPointer(window))->openSceneDialogOption();
-
-			if (key == GLFW_KEY_N && mods == GLFW_MOD_CONTROL)
-				static_cast<Engine*>(glfwGetWindowUserPointer(window))->fileNewScene();
-
-			if (key == GLFW_KEY_N && mods == (GLFW_MOD_CONTROL | GLFW_MOD_SHIFT))
-				static_cast<Engine*>(glfwGetWindowUserPointer(window))->fileEntityCreateEmpty();
 		});
 
 		initImGui(mWindow);
@@ -605,11 +561,6 @@ struct Engine final {
 	void run() {
 		init();
 
-		uint32_t glfwExtensionCount = 0;
-		const char** glfwExtensions;
-
-		glfwExtensions = glfwGetRequiredInstanceExtensions(&glfwExtensionCount);
-
 		glGenVertexArrays(1, &mEmptyVao);
 
 		while (mRunning) {
@@ -619,6 +570,7 @@ struct Engine final {
 			if (mFramebufferSize.x > 0 && mFramebufferSize.y > 0) {
 				hyperengine::Framebuffer().bind();
 				imguiBeginFrame();
+				mResourceManager.update();
 				update();
 				hyperengine::Framebuffer().bind();
 				imguiEndFrame();
@@ -659,19 +611,24 @@ struct Engine final {
 			if (mSelected != entt::null) {
 
 				bool hasGameObject = drawComponentEditGui<GameObjectComponent, Engine>(mRegistry, mSelected, "Game Object", this, [](auto& comp, auto* ptr) {
-					ImGui::InputText("Name", &comp.name);
-					ImGui::LabelText("Uuid", "%p", comp.uuid);
-					ImGui::DragFloat3("Translation", glm::value_ptr(comp.transform.translation), 0.1f);
+					imguiInputText("Name", comp.name);
+
+					imguiLabelText("Uuid", "%p", 100, comp.uuid);
+
+
+					drawVec3Control("Translation", comp.transform.translation, 0.0f, false);
+
 					glm::vec3 oldEuler = glm::degrees(glm::eulerAngles(comp.transform.orientation));
 					glm::vec3 newEuler = oldEuler;
-					if (ImGui::DragFloat3("Rotation", glm::value_ptr(newEuler))) {
+					if (drawVec3Control("Rotation", newEuler, 0.0f, false)) {
 						glm::vec3 deltaEuler = glm::radians(newEuler - oldEuler);
 						comp.transform.orientation = glm::rotate(comp.transform.orientation, deltaEuler.x, glm::vec3(1, 0, 0));
 						comp.transform.orientation = glm::rotate(comp.transform.orientation, deltaEuler.y, glm::vec3(0, 1, 0));
 						comp.transform.orientation = glm::rotate(comp.transform.orientation, deltaEuler.z, glm::vec3(0, 0, 1));
 					}
-					ImGui::DragFloat3("Scale", glm::value_ptr(comp.transform.scale), 0.1f);
-				});
+
+					drawVec3Control("Scale", comp.transform.scale, 1.0f);
+				}, false);
 
 				bool hasLight = drawComponentEditGui<LightComponent, Engine>(mRegistry, mSelected, "Light", this, [](auto& comp, auto* ptr) {
 					ImGui::ColorEdit3("Color", glm::value_ptr(comp.color));
@@ -680,44 +637,32 @@ struct Engine final {
 
 				bool hasMeshFilter = drawComponentEditGui<MeshFilterComponent, Engine>(mRegistry, mSelected, "Mesh Filter", this, [](auto& comp, auto* ptr) {
 					if (comp.mesh)
-						ImGui::LabelText("Resource", "%s", comp.mesh->origin().c_str());
+						ImGui::LabelText("Mesh", "%s", comp.mesh->origin().c_str());
 					else
-						ImGui::LabelText("Resource", "%s", "<null>");
+						ImGui::LabelText("Mesh", "%s", "<null>");
 
-					if (ImGui::Button("Select..."))
-						ImGui::OpenPopup("meshFilterSelect");
-
-					if (ImGui::BeginPopup("meshFilterSelect")) {
-						static std::string path;
-						ImGui::InputText("Resource", &path);
-						if (ImGui::Button("Apply")) {
+					if (ImGui::BeginDragDropTarget()) {
+						if (ImGuiPayload const* payload = ImGui::AcceptDragDropPayload("FilesystemFile")) {
+							std::string path((char const*)payload->Data, payload->DataSize);
 							comp.mesh = ptr->mResourceManager.getMesh(path);
-							if (comp.mesh) ImGui::CloseCurrentPopup();
 						}
-
-						ImGui::EndPopup();
+						ImGui::EndDragDropTarget();
 					}
 				});
 
 				bool hasMeshRenderer = drawComponentEditGui<MeshRendererComponent, Engine>(mRegistry, mSelected, "Mesh Renderer", this, [](auto& comp, auto* ptr) {
 					if (comp.shader)
-						ImGui::LabelText("Resource", "%s", comp.shader->origin().c_str());
+						ImGui::LabelText("Shader", "%s", comp.shader->origin().c_str());
 					else
-						ImGui::LabelText("Resource", "%s", "<null>");
+						ImGui::LabelText("Shader", "%s", "<null>");	
 
-					if (ImGui::Button("Select shader..."))
-						ImGui::OpenPopup("meshRendererShaderSelect");
-
-					if (ImGui::BeginPopup("meshRendererShaderSelect")) {
-						static std::string path;
-						ImGui::InputText("Resource", &path);
-						if (ImGui::Button("Apply")) {
+					if (ImGui::BeginDragDropTarget()) {
+						if (ImGuiPayload const* payload = ImGui::AcceptDragDropPayload("FilesystemFile")) {
+							std::string path((char const*)payload->Data, payload->DataSize);
 							comp.shader = ptr->mResourceManager.getShaderProgram(path);
 							comp.resetMaterial();
-							if (comp.shader) ImGui::CloseCurrentPopup();
 						}
-
-						ImGui::EndPopup();
+						ImGui::EndDragDropTarget();
 					}
 
 					if(comp.shader)
@@ -761,25 +706,17 @@ struct Engine final {
 							
 							ImGui::LabelText(k.c_str(), "%s", texture ? texture->origin().c_str() : "<null>");
 
-							bool pressed = false;
+							if(!texture)
+								ImGui::Image((void*)(uintptr_t)ptr->mInternalTextureCheckerboard->handle(), {64, 64}, {0, 1}, {1, 0});
+							else
+								ImGui::Image((void*)(uintptr_t)texture->handle(), { 64, 64 }, { 0, 1 }, { 1, 0 });
 
-							if (texture)
-								pressed = ImGui::ImageButton((void*)(uintptr_t)texture->handle(), { 64, 64 }, { 0, 1 }, { 1, 0 });
-							else 
-								pressed = ImGui::Button("Select");
-
-							if(pressed)
-								ImGui::OpenPopup("meshRendererTextureSelect");
-
-							if (ImGui::BeginPopup("meshRendererTextureSelect")) {
-								static std::string path;
-								ImGui::InputText("Resource", &path);
-								if (ImGui::Button("Apply")) {
+							if (ImGui::BeginDragDropTarget()) {
+								if (ImGuiPayload const* payload = ImGui::AcceptDragDropPayload("FilesystemFile")) {
+									std::string path((char const*)payload->Data, payload->DataSize);
 									comp.textures[v] = ptr->mResourceManager.getTexture(path);
-									if (comp.textures[v]) ImGui::CloseCurrentPopup();
 								}
-							
-								ImGui::EndPopup();
+								ImGui::EndDragDropTarget();
 							}
 
 							ImGui::PopID();
@@ -792,13 +729,39 @@ struct Engine final {
 					ImGui::DragFloatRange2("Clipping planes", &comp.clippingPlanes.x, &comp.clippingPlanes.y, 0.1f, 0.001f, 1000.0f);
 				});
 
-				ImGui::SeparatorText("Add Component");
+				if (ImGui::Button("Add Component")) {
+					ImGui::OpenPopup("AddComponent");
+				}
 
-				if (!hasGameObject && ImGui::Button("Game Object")) mRegistry.emplace<GameObjectComponent>(mSelected);
-				if (!hasMeshFilter && ImGui::Button("Mesh Filter")) mRegistry.emplace<MeshFilterComponent>(mSelected);
-				if (!hasMeshRenderer && ImGui::Button("Mesh Renderer")) mRegistry.emplace<MeshRendererComponent>(mSelected);
-				if (!hasLight && ImGui::Button("Light")) mRegistry.emplace<LightComponent>(mSelected);
-				if (!hasCamera && ImGui::Button("Camera")) mRegistry.emplace<CameraComponent>(mSelected);
+				if (ImGui::BeginPopup("AddComponent")) {
+
+					if (ImGui::MenuItem("Game Object", nullptr, nullptr, !hasGameObject)) {
+						mRegistry.emplace<GameObjectComponent>(mSelected);
+						ImGui::CloseCurrentPopup();
+					}
+
+					if (ImGui::MenuItem("Mesh Filter", nullptr, nullptr, !hasMeshFilter)) {
+						mRegistry.emplace<MeshFilterComponent>(mSelected);
+						ImGui::CloseCurrentPopup();
+					}
+
+					if (ImGui::MenuItem("Mesh Renderer", nullptr, nullptr, !hasMeshRenderer)) {
+						mRegistry.emplace<MeshRendererComponent>(mSelected);
+						ImGui::CloseCurrentPopup();
+					}
+
+					if (ImGui::MenuItem("Light", nullptr, nullptr, !hasLight)) {
+						mRegistry.emplace<LightComponent>(mSelected);
+						ImGui::CloseCurrentPopup();
+					}
+
+					if (ImGui::MenuItem("Camera", nullptr, nullptr, !hasCamera)) {
+						mRegistry.emplace<CameraComponent>(mSelected);
+						ImGui::CloseCurrentPopup();
+					}
+
+					ImGui::EndPopup();
+				}
 			}
 		}
 		ImGui::End();
@@ -811,16 +774,8 @@ struct Engine final {
 		if (!mViews.hierarchy) return;
 
 		if (ImGui::Begin("Hierarchy", &mViews.hierarchy)) {
-
-			ImGui::BeginDisabled(mSelected == entt::null);
-			if (ImGui::SmallButton("Delete Selected")) {
-				mRegistry.destroy(mSelected);
-				mSelected = entt::null;
-			}
-			ImGui::EndDisabled();
-
 			for (auto&& [entity, gameObject] : mRegistry.view<GameObjectComponent>().each()) {
-				ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_Leaf;
+				ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_SpanAvailWidth;
 				if (mSelected == entity)
 					flags |= ImGuiTreeNodeFlags_Selected;
 
@@ -828,8 +783,32 @@ struct Engine final {
 				if (ImGui::IsItemActive())
 					mSelected = entity;
 
+				bool shouldDelete = false;
+
+				if (ImGui::BeginPopupContextItem()) {
+					if (ImGui::MenuItem("Delete This")) {
+						shouldDelete = true;
+					}
+
+					ImGui::EndPopup();
+				}
+
 				if (opened)
 					ImGui::TreePop();
+
+
+				if (shouldDelete) {
+					if (mSelected == entity)
+						mSelected = entt::null;
+					mRegistry.destroy(entity);
+				}
+			}
+
+
+
+			if (ImGui::BeginPopupContextWindow(0, ImGuiPopupFlags_MouseButtonRight | ImGuiPopupFlags_NoOpenOverItems)) {
+				editorOpGuiEntity();
+				ImGui::EndPopup();
 			}
 		}
 		ImGui::End();
@@ -874,8 +853,7 @@ struct Engine final {
 	}
 
 	void loadScene(char const* path) {
-		fileNewScene();
-
+		editorOpNewScene();
 
 		{
 			entt::handle entity{ mRegistry, mRegistry.create() };
@@ -1037,14 +1015,29 @@ struct Engine final {
 			loadScene(source);
 	}
 
-	void fileNewScene() {
+	void editorOpNewScene() {
 		mRegistry.clear();
 		mSelected = entt::null;
 	}
 
-	void fileEntityCreateEmpty() {
+	void editorOpCreateEmpty() {
 		mSelected = mRegistry.create();
 		mRegistry.emplace<GameObjectComponent>(mSelected);
+	}
+
+	void editorOpDeleteSelected() {
+		mRegistry.destroy(mSelected);
+		mSelected = entt::null;
+	}
+
+	void editorOpGuiEntity() {
+		if (ImGui::MenuItem("Create Empty", ImGui::GetKeyChordName(ImGuiMod_Ctrl | ImGuiMod_Shift | ImGuiKey_N))) {
+			editorOpCreateEmpty();
+		}
+
+		if (ImGui::MenuItem("Delete Selected", nullptr, nullptr, mSelected != entt::null)) {
+			editorOpDeleteSelected();
+		}
 	}
 
 	void drawUi() {
@@ -1052,11 +1045,20 @@ struct Engine final {
 
 		ImGui::DockSpaceOverViewport();
 
+		if (canPerformGlobalBinding(ImGuiMod_Ctrl | ImGuiKey_O))
+			openSceneDialogOption();
+
+		if (canPerformGlobalBinding(ImGuiMod_Ctrl | ImGuiKey_N))
+			editorOpNewScene();
+			
+		if (canPerformGlobalBinding(ImGuiMod_Ctrl | ImGuiMod_Shift | ImGuiKey_N))
+			editorOpCreateEmpty();
+
 		if (ImGui::BeginMainMenuBar()) {
 			if (ImGui::BeginMenu("File")) {
-				if (ImGui::MenuItem("New Scene", "Ctrl+N", nullptr))
-					fileNewScene();
-				if (ImGui::MenuItem("Open Scene", "Ctrl+O", nullptr))
+				if (ImGui::MenuItem("New Scene", ImGui::GetKeyChordName(ImGuiMod_Ctrl | ImGuiKey_N), nullptr))
+					editorOpNewScene();
+				if (ImGui::MenuItem("Open Scene", ImGui::GetKeyChordName(ImGuiMod_Ctrl | ImGuiKey_O), nullptr))
 					openSceneDialogOption();
 
 				ImGui::Separator();
@@ -1073,9 +1075,7 @@ struct Engine final {
 			}
 
 			if (ImGui::BeginMenu("Entity")) {
-				if (ImGui::MenuItem("Create Empty", "Ctrl+Shift+N", nullptr))
-					fileEntityCreateEmpty();
-
+				editorOpGuiEntity();
 				ImGui::EndMenu();
 			}
 
@@ -1102,6 +1102,10 @@ struct Engine final {
 
 			ImGui::EndMainMenuBar();
 		}
+
+		hyperengine::getConsole().draw(&mViews.console);
+
+		mGuiFilesystem.draw(&mViews.filesystem, mResourceManager);
 
 		if (ImGui::Begin("Debug")) {
 			ImGui::SeparatorText("GPU Info");
@@ -1152,7 +1156,9 @@ struct Engine final {
 						}
 					}
 
+					ImGui::PushFont(fonts["mono"]);
 					v.editor.Render(k.c_str());
+					ImGui::PopFont();
 				}
 				ImGui::End();
 			}
@@ -1394,6 +1400,9 @@ struct Engine final {
 
 					// Find sun
 					for (auto&& [entity, gameObject, light] : mRegistry.view<GameObjectComponent, LightComponent>().each()) {
+						//gameObject.transform.orientation = glm::rotate(gameObject.transform.orientation, glm::radians(ImGui::GetIO().DeltaTime * 10.0f), glm::vec3(1, 0, 0));
+						//gameObject.transform.orientation = glm::rotate(gameObject.transform.orientation, glm::radians(ImGui::GetIO().DeltaTime * 1.0f), glm::vec3(0, 1, 0));
+
 						sunDirection = glm::normalize(glm::vec3(gameObject.transform.get() * glm::vec4(0, 0, -1, 0)));
 						sunColor = light.color * light.strength;
 						break;
@@ -1461,6 +1470,8 @@ struct Engine final {
 
 	hyperengine::Window mWindow;
 
+	hyperengine::gui::Filesystem mGuiFilesystem;
+
 	float mShadowMapOffset = 16.0f;
 	float mShadowMapNear = 0.1f;
 	float mShadowMapDistance = 64.0f;
@@ -1493,17 +1504,41 @@ struct Engine final {
 	ImGuizmo::OPERATION mOperation = ImGuizmo::OPERATION::TRANSLATE;
 	ImGuizmo::MODE mMode = ImGuizmo::MODE::LOCAL;
 
-	GLuint mEmptyVao;
+	GLuint mEmptyVao = 0;
 
 	std::shared_ptr<hyperengine::ShaderProgram> mShadowProgram;
 	std::shared_ptr<hyperengine::ShaderProgram> mAcesProgram;
 	std::shared_ptr<hyperengine::Texture> mInternalTextureBlack;
 	std::shared_ptr<hyperengine::Texture> mInternalTextureWhite;
 	std::shared_ptr<hyperengine::Texture> mInternalTextureUv;
+	std::shared_ptr<hyperengine::Texture> mInternalTextureCheckerboard;
+};
+
+template<typename Mutex>
+class my_sink : public spdlog::sinks::base_sink <Mutex> {
+protected:
+	void sink_it_(const spdlog::details::log_msg& msg) override {
+		spdlog::memory_buf_t formatted;
+		spdlog::sinks::base_sink<Mutex>::formatter_->format(msg, formatted);
+
+		constexpr ImVec4 colors[] = {
+			{ 204.0f / 255.0f, 204.0f / 255.0f, 204.0f / 255.0f, 1.0f },
+			{  58.0f / 255.0f, 150.0f / 255.0f, 221.0f / 255.0f, 1.0f },
+			{  19.0f / 255.0f, 161.0f / 255.0f,  14.0f / 255.0f, 1.0f },
+			{ 249.0f / 255.0f, 241.0f / 255.0f, 165.0f / 255.0f, 1.0f },
+			{ 231.0f / 255.0f,  72.0f / 255.0f,  86.0f / 255.0f, 1.0f },
+			{ 197.0f / 255.0f,  15.0f / 255.0f,  31.0f / 255.0f, 1.0f }
+		};
+		
+		hyperengine::getConsole().addLog(fmt::to_string(formatted), colors[msg.level - spdlog::level::trace]);
+	}
+
+	void flush_() override {}
 };
 
 int main(int argc, char* argv[]) {
 	TracySetProgramName("HyperEngine");
+	spdlog::default_logger()->sinks().push_back(std::make_shared<my_sink<std::mutex>>());
 	spdlog::set_level(spdlog::level::trace);
 	hyperengine::setupRenderDoc(true);
 

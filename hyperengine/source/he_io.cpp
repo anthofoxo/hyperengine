@@ -13,6 +13,8 @@
 #define STB_IMAGE_IMPLEMENTATION
 #include <stb_image.h>
 
+#include <spdlog/spdlog.h>
+
 namespace hyperengine {
 	std::optional<std::string> readFileString(char const* path) {
 		std::ifstream file;
@@ -74,17 +76,30 @@ namespace hyperengine {
 
 		aiMesh* mesh = scene->mMeshes[0];
 
+		if (!mesh->HasTextureCoords(0)) {
+			spdlog::warn("No texture coordinates found in mesh: {}", path);
+		}
+
+		if (!mesh->HasTangentsAndBitangents()) {
+			spdlog::warn("No tangents found in mesh: {}", path);
+		}
+
 		std::vector<Vertex> vertices;
 		vertices.reserve(mesh->mNumVertices);
 
 		for (unsigned int i = 0; i < mesh->mNumVertices; ++i) {
 			glm::vec2 texCoord = glm::vec2(0, 0);
+			glm::vec3 tangent = {};
+
+			if (mesh->HasTangentsAndBitangents())
+				tangent = std::bit_cast<glm::vec3>(mesh->mTangents[i]);
+
 			if (mesh->HasTextureCoords(0)) {
 				auto& textureCoord = mesh->mTextureCoords[0][i];
 				texCoord = glm::vec2(textureCoord.x, textureCoord.y);
 			}
 
-			vertices.emplace_back(std::bit_cast<glm::vec3>(mesh->mVertices[i]), std::bit_cast<glm::vec3>(mesh->mNormals[i]), texCoord, std::bit_cast<glm::vec3>(mesh->mTangents[i]));
+			vertices.emplace_back(std::bit_cast<glm::vec3>(mesh->mVertices[i]), std::bit_cast<glm::vec3>(mesh->mNormals[i]), texCoord, tangent);
 		}
 
 		unsigned char elementPrimitiveWidth;

@@ -9,6 +9,19 @@
 #include <lua.hpp>
 #include <glm/glm.hpp>
 
+#define HE_CAT_(a, b) a ## b
+#define HE_CAT(a, b) HE_CAT_(a, b)
+#define HE_VARNAME(Var) HE_CAT(Var, __LINE__)
+#define HE_UNNAMABLE HE_VARNAME(_reserved)
+#define HE_ARRAYSIZE(_array) ((int)(sizeof(_array) / sizeof(*(_array))))
+
+#ifdef _MSC_VER
+#	include <Windows.h>
+#	define HE_ALLOCATOR(size) _Ret_notnull_ _Post_writable_byte_size_(size) __declspec(allocator)
+#else
+#	define HE_ALLOCATOR(size)
+#endif
+
 namespace hyperengine {
 	template<class... Callable>
 	struct Visitor : Callable... {
