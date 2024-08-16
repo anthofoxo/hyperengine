@@ -17,10 +17,10 @@ local objects = {
 			name = "ground",
 			uuid = 0xcc2481208078944e,
 			translation = { 0, 0, 0 },
-			scale = { 75, 75, 75 },
+			scale = { 1.5, 1.0, 1.5 },
 		},
 		MeshFilter = {
-			resource = "plane.obj",
+			resource = "terrain.obj",
 		},
 		MeshRenderer = {
 			shader = "shaders/terrain_basic.glsl",

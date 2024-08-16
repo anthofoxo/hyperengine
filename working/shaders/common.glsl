@@ -1,37 +1,3 @@
-// --- Shader documentation ---
-// All shader files should begin with `#inject`,
-// This will cause the HyperEngine shader engine to include the `#version` directive and proper `#define`s.
-//
-// You can use `#include` in your shaders. This will include files from the `./shaders` directory.
-// You likely want to `#include "common"` at the top of all your shaders.
-//
-// --- Engine pragmas ----
-// HyperEngine can read back values from the shader using `@` pragmas.
-// Operates similarly to `#pragma` but with unique syntax for parsing.
-//
-// 0 = false ; 1 = true
-//
-// Enable or disable backface culling, Enabled by default
-// @property cull = 0|1
-// 
-// Give the editor hints on how to render the uniform
-// @edithint <uniform> = hidden|color
-//
-// "hidden" will completely remove the control from the property panel.
-// This is generally used for uniforms the engine runtime fills in.
-//
-// "color" will present a color gui instead of float sliders
-//
-//
-// You can `#define FAST` after the `#inject` to trigger your shader to run lower quality.
-// This currently affects shadow sampling and terrain texture mapping
-//
-// Example:
-// #inject
-// #define FAST
-// #include "common"
-// ...
-
 #ifdef VERT
 #	define INPUT(type, name, index) layout(location = index) in type name
 #	define OUTPUT(type, name, index)
@@ -200,7 +166,7 @@ float _shadowCalculation(sampler2D samp, vec4 fragPosLightSpace, vec3 normal, ve
 		return 0.0;
 	
 	float currentDepth = projCoords.z;
-	float bias = max(0.001 * (1.0 - dot(normal, -sunDirection)), 0.0);
+	float bias = max(0.002 * (1.0 - dot(normal, -sunDirection)), 0.0);
 
 #ifdef FAST
 	float pcfDepth = texture(samp, projCoords.xy).r;
@@ -213,9 +179,9 @@ float _shadowCalculation(sampler2D samp, vec4 fragPosLightSpace, vec3 normal, ve
 	int sampleCount = offset * offset;
 
 	for(int i = 0; i < sampleCount; ++i) {
-		// vec2 offset = vec2(random((gl_FragCoord.xy) + gTime * 0.0199814), random(gl_FragCoord.yx - gTime * 0.074115)) * 2.0 - 1.0;
 		vec2 offset = vec2(i / offset, i % offset) - (float(offset) / 2.0);
 		offset += samplePoisson(i);
+		//offset += vec2(random((gl_FragCoord.xy) + gTime * 0.0199814), random(gl_FragCoord.yx - gTime * 0.074115)) * 1.0 - 0.5;
 		
 		float pcfDepth = texture(samp, projCoords.xy + offset * texelSize).r;
 		shadow += currentDepth - bias > pcfDepth ? 1.0 : 0.0;

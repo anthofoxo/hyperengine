@@ -1,18 +1,18 @@
 # HyperEngine
-HyperEngine is an early-sage interactive application and rendering engine for Windows and Linux.
+HyperEngine is an early-stage interactive application and rendering engine for Windows and Linux.
 
 ## Getting Started
 Visual Studio 2019 or 2022 is recommended.
 
 <ins>**1. Downloading the repo:**</ins>
 
-Start by cloning the repo with `git clone --recurse-submodules https://github.com/anthofoxo/hyperengine`.
+Start by cloning the repo. `git clone --recurse-submodules https://github.com/anthofoxo/hyperengine`.
 
 If the repository was cloned non-recursively previously, use `git submodule update --init` to clone the necessary submodules.
 
-<ins>**2. Configuring the dependencies: (Linux only)**</ins>
+<ins>**2. Configuring wayland dependencies: (Linux only)**</ins>
 
-HyperEngine supports wayland which required generating headers. Run `./scripts/xdg.sh` to generate the `xdg` headers.
+HyperEngine supports wayland via GLFW which requires generating headers. Run `./scripts/xdg.sh` to generate the `xdg` headers.
 
 <ins>**3. Building:**</ins>
 
@@ -28,22 +28,43 @@ The default overlays are disable but will still be functional. F12 will still ca
 ### Tracy
 [Tracy](https://github.com/wolfpld/tracy/releases/tag/v0.11.0) is a frame profiler that is default supported. You can attach the tracy profiler at anytime.
 
-### TODO
-We are working on file and directory watchers and dynamic asset reloading but is not complete.
-
-## Engine Defined Shader Macros
-HyperEngine will predefine some macros to make shaders easier to write.
-
-A macro will be defined for each shader compilation stage. The engine internally splits this up correctly for the OpenGL Api.
+## Shaders
+All shader files should begin with `#inject`,
+This will cause the HyperEngine shader engine to include the `#version` directive and proper `#define`s.
 
 * `VERT` is defined if the source is being passed to the vertex shader compiler.
 * `FRAG` is defined if the source is being passed to the fragment shader compiler.
 
-Some helper macros are defined help keep variables in one section and to reduce errors.
+You can use `#include` in your shaders. This will include files from the `./shaders` directory.
+You likely want to `#include "common"` at the top of all your shaders.
 
-* `INPUT` is only expanded for vertex shaders.
-* `OUTPUT` is only expanded for fragment shaders.
-* `VARYING` is defined to output from the vertex shader and input to fragment shaders. Similarly to how the `varying` specifier used to work.
+HyperEngine can read back values from the shader using `@` pragmas.
+Operates similarly to `#pragma` but with unique syntax for parsing.
+
+
+`0 = false ; 1 = true`
+
+Enable or disable backface culling, Enabled by default
+`@property cull = 0|1`
+
+Give the editor hints on how to render the uniform
+`@edithint <uniform> = hidden|color`
+
+`hidden` will completely remove the control from the property panel.
+This is generally used for uniforms the engine runtime fills in.
+
+`color` will present a color gui instead of float sliders.
+
+You can `#define FAST` after the `#inject` to trigger your shader to run lower quality.
+This currently affects shadow sampling and terrain texture mapping
+
+Example:
+```glsl
+#inject
+#define FAST
+#include "common"
+...
+```
 
 See shader sources in `./working` for examples.
 

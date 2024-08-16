@@ -194,6 +194,11 @@ struct GameObjectComponent final {
 		ss << "unnamed " << std::hex << (uint64_t)uuid;
 		name = ss.str();
 	}
+
+	entt::entity parent = entt::null;
+	entt::entity first = entt::null;
+	entt::entity prev = entt::null;
+	entt::entity next = entt::null;
 };
 
 struct MeshFilterComponent {
@@ -277,7 +282,7 @@ static_assert(offsetof(UniformEngineData, gTime)        == 220);
 static_assert(offsetof(UniformEngineData, sunColor)     == 224);
 
 struct Views final {
-	bool hierarchy = true;
+	bool flatHierarchy = true;
 	bool properties = true;
 	bool viewport = true;
 	bool console = true;
@@ -287,7 +292,7 @@ struct Views final {
 	bool experimentAudio = false;
 
 	void drawUi() {
-		ImGui::MenuItem("Hierarchy", nullptr, &hierarchy);
+		ImGui::MenuItem("Hierarchy", nullptr, &flatHierarchy);
 		ImGui::MenuItem("Properties", nullptr, &properties);
 		ImGui::MenuItem("Viewport", nullptr, &viewport);
 		ImGui::MenuItem("Console", nullptr, &console);
@@ -537,6 +542,7 @@ struct Engine final {
 		glBindBuffer(GL_UNIFORM_BUFFER, 0);
 		glBindBufferBase(GL_UNIFORM_BUFFER, 0, mEngineUniformBuffer);
 		genShadowmap();
+		editorOpNewScene();
 	}
 
 	void genShadowmap() {
@@ -773,12 +779,12 @@ struct Engine final {
 		
 	}
 
-	void drawGuiHierarchy() {
+	void drawGuiFlatHierarchy() {
 		ZoneScoped;
 
-		if (!mViews.hierarchy) return;
+		if (!mViews.flatHierarchy) return;
 
-		if (ImGui::Begin("Hierarchy", &mViews.hierarchy)) {
+		if (ImGui::Begin("Flat Hierarchy", &mViews.flatHierarchy)) {
 			for (auto&& [entity, gameObject] : mRegistry.view<GameObjectComponent>().each()) {
 				ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_SpanAvailWidth;
 				if (mSelected == entity)
@@ -938,6 +944,7 @@ struct Engine final {
 						gameObject.transform.scale = hyperengine::luaToVec3(L);
 					}
 					lua_pop(L, 1);
+
 				}
 				lua_pop(L, 1);
 
@@ -1037,118 +1044,7 @@ struct Engine final {
 				lua_pop(L, 1);
 			}
 		}
-#if 0
-		else {
-			int t = lua_gettop(L); // Table index
-			lua_pushnil(L); // First key
-			while (lua_next(L, t) != 0) {
-				/* 'key' (at index -2) and 'value' (at index -1) */
-				entt::entity entity = mRegistry.create();
-				GameObjectComponent& gameObject = mRegistry.emplace<GameObjectComponent>(entity);
-				MeshFilterComponent& meshFilter = mRegistry.emplace<MeshFilterComponent>(entity);
-				MeshRendererComponent& meshRenderer = mRegistry.emplace<MeshRendererComponent>(entity);
 
-				lua_getfield(L, -1, "name");
-				if (lua_isstring(L, -1))
-					gameObject.name = lua_tostring(L, -1);
-				lua_pop(L, 1);
-
-				lua_getfield(L, -1, "mesh");
-				if (lua_isstring(L, -1))
-					meshFilter.mesh = mResourceManager.getMesh(lua_tostring(L, -1));
-				lua_pop(L, 1);
-
-				lua_getfield(L, -1, "shader");
-				if (lua_isstring(L, -1))
-					meshRenderer.shader = mResourceManager.getShaderProgram(lua_tostring(L, -1), mFileErrors);
-				lua_pop(L, 1);
-
-				// Apply stored material information
-				if (meshRenderer.shader) {
-
-					meshRenderer.allocateMaterialBuffer();
-
-					lua_getfield(L, -1, "material");
-
-					// Apply material settings if present
-					if (lua_istable(L, -1)) {
-
-						int materialTable = lua_gettop(L); // Table index
-						lua_pushnil(L);
-
-						while (lua_next(L, materialTable) != 0) {
-							/* 'key' (at index -2) and 'value' (at index -1) */
-
-							// Find material property in shader
-							auto it = meshRenderer.shader->materialInfo().find(lua_tostring(L, -2));
-							if (it != meshRenderer.shader->materialInfo().end()) {
-								auto offset = it->second.offset;
-								auto type = it->second.type;
-
-								if (type == hyperengine::ShaderProgram::UniformType::kFloat && lua_isnumber(L, -1)) {
-									*((float*)(meshRenderer.data.data() + offset)) = static_cast<float>(lua_tonumber(L, -1));
-								}
-								else if (type == hyperengine::ShaderProgram::UniformType::kVec2f && lua_istable(L, -1)) {
-									*((glm::vec2*)(meshRenderer.data.data() + offset)) = hyperengine::luaToVec2(L);
-								}
-								else if (type == hyperengine::ShaderProgram::UniformType::kVec3f && lua_istable(L, -1)) {
-									*((glm::vec3*)(meshRenderer.data.data() + offset)) = hyperengine::luaToVec3(L);
-								}
-								else if (type == hyperengine::ShaderProgram::UniformType::kVec4f && lua_istable(L, -1)) {
-									*((glm::vec4*)(meshRenderer.data.data() + offset)) = hyperengine::luaToVec4(L);
-								}
-								else
-									spdlog::warn("Unsupported uniform type");
-							}
-
-							lua_pop(L, 1);
-						}
-					}
-
-					lua_pop(L, 1);
-				}
-
-				if (meshRenderer.shader) {
-					lua_getfield(L, -1, "textures");
-
-					// Apply textures
-					if (lua_istable(L, -1)) {
-
-						int textureTable = lua_gettop(L); // Table index
-						lua_pushnil(L);
-
-						while (lua_next(L, textureTable) != 0) {
-							/* 'key' (at index -2) and 'value' (at index -1) */
-
-							// Find texture property in shader
-							auto it = meshRenderer.shader->opaqueAssignments().find(lua_tostring(L, -2));
-							if (it != meshRenderer.shader->opaqueAssignments().end()) {
-								meshRenderer.textures[it->second] = mResourceManager.getTexture(lua_tostring(L, -1));
-							}
-
-							lua_pop(L, 1);
-						}
-
-					}
-
-					lua_pop(L, 1);
-				}
-
-
-				lua_getfield(L, -1, "translation");
-				if (lua_istable(L, -1))
-					gameObject.transform.translation = hyperengine::luaToVec3(L);
-				lua_pop(L, 1);
-
-				lua_getfield(L, -1, "scale");
-				if (lua_istable(L, -1))
-					gameObject.transform.scale = hyperengine::luaToVec3(L);
-				lua_pop(L, 1);
-
-				lua_pop(L, 1); // remove value
-			}
-		}
-#endif
 
 		lua_pop(L, 1); // Pop table
 
@@ -1166,6 +1062,10 @@ struct Engine final {
 	void editorOpNewScene() {
 		mRegistry.clear();
 		mSelected = entt::null;
+
+		auto& rootGameObject = mRegistry.emplace<GameObjectComponent>(mRoot);
+		rootGameObject.name = "_root";
+		rootGameObject.uuid = 0;
 	}
 
 	void editorOpCreateEmpty() {
@@ -1188,6 +1088,16 @@ struct Engine final {
 		}
 	}
 
+	void editorOpReloadShaders() {
+		for (auto& [k, v] : mResourceManager.mShaders) {
+			if (std::shared_ptr<hyperengine::ShaderProgram> program = v.lock()) {
+				mFileErrors.erase(std::u8string((char8_t const*)k.c_str()));
+				mResourceManager.reloadShader(k, *program, mFileErrors);
+			}
+		}
+		spdlog::info("Reloaded Shaders");
+	}
+
 	void drawUi() {
 		ZoneScoped;
 
@@ -1201,6 +1111,9 @@ struct Engine final {
 			
 		if (canPerformGlobalBinding(ImGuiMod_Ctrl | ImGuiMod_Shift | ImGuiKey_N))
 			editorOpCreateEmpty();
+
+		if (canPerformGlobalBinding(ImGuiMod_Shift | ImGuiKey_R))
+			editorOpReloadShaders();
 
 		if (ImGui::BeginMainMenuBar()) {
 			if (ImGui::BeginMenu("File")) {
@@ -1228,14 +1141,8 @@ struct Engine final {
 			}
 
 			if (ImGui::BeginMenu("Debug")) {
-				if (ImGui::MenuItem("Reload shaders")) {
-					
-					for (auto& [k, v] : mResourceManager.mShaders) {
-						if (std::shared_ptr<hyperengine::ShaderProgram> program = v.lock()) {
-							mFileErrors.erase(std::u8string((char8_t const*)k.c_str()));
-							mResourceManager.reloadShader(k, *program, mFileErrors);
-						}
-					}
+				if (ImGui::MenuItem("Reload Shaders", ImGui::GetKeyChordName(ImGuiMod_Shift | ImGuiKey_R))) {
+					editorOpReloadShaders();
 				}
 
 				if (ImGui::MenuItem("Capture Frame", nullptr, nullptr, hyperengine::isRenderDocRunning())) {
@@ -1419,7 +1326,7 @@ struct Engine final {
 		}
 
 		drawGuiResourceManager();
-		drawGuiHierarchy();
+		drawGuiFlatHierarchy();
 		drawGuiProperties();
 		audioExperiment();
 
@@ -1740,6 +1647,7 @@ struct Engine final {
 	entt::registry mRegistry;
 	ResourceManager mResourceManager;
 	entt::entity mSelected = entt::null;
+	entt::entity mRoot = entt::null;
 
 	GLuint mEngineUniformBuffer = 0;
 	UniformEngineData mUniformEngineData;
