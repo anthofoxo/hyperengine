@@ -1,12 +1,9 @@
 #pragma once
 
-namespace hyperengine {
-	void setupRenderDoc(bool load);
-	bool isRenderDocRunning();
-
-	namespace rdoc {
-		bool isTargetControlConnected();
-		void triggerCapture();
-		bool isFrameCapturing();
-	}
+namespace hyperengine::rdoc {
+	void setup(bool load);
+	bool isRunning();
+	bool isTargetControlConnected();
+	void triggerCapture();
+	bool isFrameCapturing();
 }

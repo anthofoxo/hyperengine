@@ -39,8 +39,8 @@ namespace {
 	}
 }
 
-namespace hyperengine {
-	void setupRenderDoc(bool load) {
+namespace hyperengine::rdoc {
+	void setup(bool load) {
 		loadSharedLibrary(load);
 		if (!gApi) return;
 
@@ -48,24 +48,22 @@ namespace hyperengine {
 		gApi->SetCaptureOptionU32(eRENDERDOC_Option_DebugOutputMute, 0);
 	}
 
-	bool isRenderDocRunning() {
+	bool isRunning() {
 		return gApi;
 	}
 
-	namespace rdoc {
-		bool isTargetControlConnected() {
-			if (!gApi) return false;
-			return gApi->IsTargetControlConnected();
-		}
+	bool isTargetControlConnected() {
+		if (!gApi) return false;
+		return gApi->IsTargetControlConnected();
+	}
 
-		void triggerCapture() {
-			if (!gApi) return;
-			gApi->TriggerCapture();
-		}
+	void triggerCapture() {
+		if (!gApi) return;
+		gApi->TriggerCapture();
+	}
 
-		bool isFrameCapturing() {
-			if (!gApi) return false;
-			return gApi->IsFrameCapturing();
-		}
+	bool isFrameCapturing() {
+		if (!gApi) return false;
+		return gApi->IsFrameCapturing();
 	}
 }

@@ -28,9 +28,10 @@ includedirs {
     "%{wks.location}/vendor/lua/src",
     "%{wks.location}/vendor/tracy/public",
     "%{wks.location}/vendor/spdlog/include",
+    "%{wks.location}/vendor/bullet3/src",
 }
 
-links { "glfw", "glad", "imgui", "imguizmo", "assimp", "lua", "tracy" }
+links { "glfw", "glad", "imgui", "imguizmo", "assimp", "lua", "tracy", "bullet3" }
 
 filter "system:windows"
 files "%{prj.location}/*.rc"

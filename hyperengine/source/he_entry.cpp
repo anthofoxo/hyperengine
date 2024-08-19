@@ -21,6 +21,8 @@
 
 #include "gui/he_console.hpp"
 
+#include <btBulletDynamicsCommon.h>
+
 #include <debug_trap.h>
 
 #include "he_resourcemanager.hpp"
@@ -248,7 +250,7 @@ struct MeshRendererComponent {
 	}
 };
 
-struct CameraComponent {
+struct CameraComponent final {
 	glm::vec2 clippingPlanes = { 0.1f, 100.0f };
 	float fov = 80.0f;
 };
@@ -445,6 +447,72 @@ static bool canPerformGlobalBinding(ImGuiKeyChord chord) {
 	return !isRouted && ImGui::IsKeyChordPressed(chord);
 }
 
+class PhysicsWorld final {
+public:
+	PhysicsWorld(btVector3 gravity = btVector3(0, -10, 0)) {
+		mCollisionConfiguration = std::make_unique<btDefaultCollisionConfiguration>();
+		mDispatcher = std::make_unique<btCollisionDispatcher>(mCollisionConfiguration.get());
+		mPairCache = std::make_unique<btDbvtBroadphase>(); // can also try btAxis3Sweep
+		mConstraintSolver = std::make_unique<btSequentialImpulseConstraintSolver>();
+		mDynamicsWorld = std::make_unique<btDiscreteDynamicsWorld>(mDispatcher.get(), mPairCache.get(), mConstraintSolver.get(), mCollisionConfiguration.get());
+		mDynamicsWorld->setGravity(gravity);
+	}
+
+	void stepSimulation(btScalar timeStep, int maxSubSteps = 1, btScalar fixedTimeStep = 1.0f / 60.0f) {
+		ZoneScoped;
+		mDynamicsWorld->stepSimulation(timeStep, maxSubSteps, fixedTimeStep);
+	}
+public:
+	std::unique_ptr<btDefaultCollisionConfiguration> mCollisionConfiguration;
+	std::unique_ptr<btCollisionDispatcher> mDispatcher;
+	std::unique_ptr<btBroadphaseInterface> mPairCache;
+	std::unique_ptr<btSequentialImpulseConstraintSolver> mConstraintSolver;
+	std::unique_ptr<btDiscreteDynamicsWorld> mDynamicsWorld;
+};
+
+
+ATTRIBUTE_ALIGNED16(struct) EngineMotionState : public btMotionState{
+	entt::handle mHandle;
+
+	BT_DECLARE_ALIGNED_ALLOCATOR();
+	EngineMotionState(entt::handle handle) : mHandle(handle) {}
+
+	virtual void getWorldTransform(btTransform& worldTrans) const override {
+		auto transform = mHandle.get<GameObjectComponent>().transform;
+		transform.scale = glm::vec3(1.0f);
+		worldTrans.setFromOpenGLMatrix(glm::value_ptr(transform.get()));
+	}
+
+	virtual void setWorldTransform(btTransform const& worldTrans) override {
+		glm::mat4 matrix;
+		worldTrans.getOpenGLMatrix(glm::value_ptr(matrix));
+		auto& transform = mHandle.get<GameObjectComponent>().transform;
+		glm::vec3 oldScale = transform.scale;
+		transform.set(matrix);
+		transform.scale = oldScale;
+	}
+};
+
+struct PhysicsComponent final {
+	void attach(PhysicsWorld& world) {
+		if (attached) return;
+		attached = true;
+		world.mDynamicsWorld->addRigidBody(mBody.get());
+	}
+
+	void detach(PhysicsWorld& world) {
+		if (!attached) return;
+		attached = false;
+		world.mDynamicsWorld->removeCollisionObject(mBody.get());
+	}
+
+	std::unique_ptr<btRigidBody> mBody;
+	std::unique_ptr<btCollisionShape> mShape;
+	std::unique_ptr<EngineMotionState> mMotionState;
+	bool attached = false;
+
+};
+
 struct Engine final {
 	void createInternalTextures() {
 		mResourceManager.assertTextureLifetime(mResourceManager.getTexture("icons/file.png"));
@@ -543,6 +611,8 @@ struct Engine final {
 		glBindBufferBase(GL_UNIFORM_BUFFER, 0, mEngineUniformBuffer);
 		genShadowmap();
 		editorOpNewScene();
+
+		
 	}
 
 	void genShadowmap() {
@@ -580,6 +650,7 @@ struct Engine final {
 				imguiBeginFrame();
 				mResourceManager.update();
 				update();
+				mPhysicsWorld.stepSimulation(ImGui::GetIO().DeltaTime, 10);
 				hyperengine::Framebuffer().bind();
 				imguiEndFrame();
 			}
@@ -627,18 +698,32 @@ struct Engine final {
 						ImGui::SetClipboardText(formatted.c_str());
 					}
 
-					drawVec3Control("Translation", comp.transform.translation, 0.0f, false);
+					bool edited = false;
+
+					edited |= drawVec3Control("Translation", comp.transform.translation, 0.0f, false);
 
 					glm::vec3 oldEuler = glm::degrees(glm::eulerAngles(comp.transform.orientation));
 					glm::vec3 newEuler = oldEuler;
-					if (drawVec3Control("Rotation", newEuler, 0.0f, false)) {
+
+					if (edited |= drawVec3Control("Rotation", newEuler, 0.0f, false)) {
 						glm::vec3 deltaEuler = glm::radians(newEuler - oldEuler);
 						comp.transform.orientation = glm::rotate(comp.transform.orientation, deltaEuler.x, glm::vec3(1, 0, 0));
 						comp.transform.orientation = glm::rotate(comp.transform.orientation, deltaEuler.y, glm::vec3(0, 1, 0));
 						comp.transform.orientation = glm::rotate(comp.transform.orientation, deltaEuler.z, glm::vec3(0, 0, 1));
 					}
 
-					drawVec3Control("Scale", comp.transform.scale, 1.0f);
+					edited |= drawVec3Control("Scale", comp.transform.scale, 1.0f);
+
+					if (edited) {
+						auto* physics = ptr->mRegistry.try_get<PhysicsComponent>(ptr->mSelected);
+						if (physics) {
+							btTransform trans;
+							physics->mMotionState->getWorldTransform(trans);
+							physics->mBody->setWorldTransform(trans);
+							physics->mBody->activate();
+							physics->mBody->clearForces();
+						}
+					}
 				}, false);
 
 				bool hasLight = drawComponentEditGui<LightComponent, Engine>(mRegistry, mSelected, "Light", this, [](auto& comp, auto* ptr) {
@@ -1059,13 +1144,77 @@ struct Engine final {
 			loadScene(source);
 	}
 
+	void DetachPhysicsObj(entt::registry& reg, entt::entity e) {
+
+		reg.get<PhysicsComponent>(e).detach(mPhysicsWorld);
+
+		for (int i = 0; i < mPhysicsWorld.mDynamicsWorld->getNumCollisionObjects(); ++i) {
+			mPhysicsWorld.mDynamicsWorld->getCollisionObjectArray()[i]->activate(true);
+		}
+	}
+
 	void editorOpNewScene() {
 		mRegistry.clear();
+		mRegistry = entt::registry();
 		mSelected = entt::null;
+		mRegistry.on_destroy<PhysicsComponent>().connect<&Engine::DetachPhysicsObj>(this);
 
 		auto& rootGameObject = mRegistry.emplace<GameObjectComponent>(mRoot);
 		rootGameObject.name = "_root";
 		rootGameObject.uuid = 0;
+
+		{
+			entt::entity entity = mRegistry.create();
+			auto& gameObject = mRegistry.emplace<GameObjectComponent>(entity);
+			gameObject.transform.scale = { 30, 30, 30 };
+			auto& comp = mRegistry.emplace<PhysicsComponent>(entity);
+			auto& meshFilter = mRegistry.emplace<MeshFilterComponent>(entity);
+			meshFilter.mesh = mResourceManager.getMesh("plane.obj");
+			comp.mShape = std::make_unique<btStaticPlaneShape>(btVector3(0, 1, 0), 0);
+			auto& meshRenderer = mRegistry.emplace<MeshRendererComponent>(entity);
+			meshRenderer.shader = mResourceManager.getShaderProgram("shaders/opaque.glsl", mFileErrors);
+			if (meshRenderer.shader) {
+				meshRenderer.allocateMaterialBuffer();
+				*((glm::vec3*)meshRenderer.data.data()) = glm::vec3(1.0f);
+				meshRenderer.textures[meshRenderer.shader->opaqueAssignments().at("tAlbedo")] = mResourceManager.getTexture("rocks.png");
+			}
+			btScalar mass = 0.0f;
+			btVector3 localInertia = btVector3(0, 0, 0);
+			if (mass > 0.0f) comp.mShape->calculateLocalInertia(mass, localInertia);
+			comp.mMotionState = std::make_unique<EngineMotionState>(entt::handle(mRegistry, entity));
+			auto info = btRigidBody::btRigidBodyConstructionInfo{ mass, comp.mMotionState.get(), comp.mShape.get(), localInertia };
+			info.m_linearDamping = .2f;
+			info.m_angularDamping = .2f;
+			info.m_restitution = 1.0f;
+			comp.mBody = std::make_unique<btRigidBody>(info);
+			comp.attach(mPhysicsWorld);
+		}
+		for (int y = 0; y < 20; ++y) {
+			entt::entity entity = mRegistry.create();
+			auto& gameObject = mRegistry.emplace<GameObjectComponent>(entity);
+			gameObject.transform.translation = { 0, 5 * y + 5, 0 };
+			auto& comp = mRegistry.emplace<PhysicsComponent>(entity);
+			auto& meshFilter = mRegistry.emplace<MeshFilterComponent>(entity);
+			meshFilter.mesh = mResourceManager.getMesh("cube.obj");
+			auto& meshRenderer = mRegistry.emplace<MeshRendererComponent>(entity);
+			meshRenderer.shader = mResourceManager.getShaderProgram("shaders/opaque.glsl", mFileErrors);
+			if (meshRenderer.shader) {
+				meshRenderer.allocateMaterialBuffer();
+				*((glm::vec3*)meshRenderer.data.data()) = glm::vec3(1.0f);
+				meshRenderer.textures[meshRenderer.shader->opaqueAssignments().at("tAlbedo")] = mResourceManager.getTexture("rocks.png");
+			}
+			comp.mShape = std::make_unique<btBoxShape>(btVector3(1.0f, 1.0f, 1.0f));
+			btScalar mass = 1.0f;
+			btVector3 localInertia(0, 0, 0);
+			if (mass > 0.0f) comp.mShape->calculateLocalInertia(mass, localInertia);
+			comp.mMotionState = std::make_unique<EngineMotionState>(entt::handle(mRegistry, entity));
+			auto info = btRigidBody::btRigidBodyConstructionInfo{ mass, comp.mMotionState.get(), comp.mShape.get(), localInertia };
+			info.m_linearDamping = .2f;
+			info.m_angularDamping = .2f;
+			info.m_restitution = 0.5f;
+			comp.mBody = std::make_unique<btRigidBody>(info);
+			comp.attach(mPhysicsWorld);
+		}
 	}
 
 	void editorOpCreateEmpty() {
@@ -1145,11 +1294,11 @@ struct Engine final {
 					editorOpReloadShaders();
 				}
 
-				if (ImGui::MenuItem("Capture Frame", nullptr, nullptr, hyperengine::isRenderDocRunning())) {
+				if (ImGui::MenuItem("Capture Frame", nullptr, nullptr, hyperengine::rdoc::isRunning())) {
 					hyperengine::rdoc::triggerCapture();
 				}
 
-				if (ImGui::MenuItem("Attach RenderDoc", nullptr, nullptr, hyperengine::isRenderDocRunning() && !hyperengine::rdoc::isTargetControlConnected())) {
+				if (ImGui::MenuItem("Attach RenderDoc", nullptr, nullptr, hyperengine::rdoc::isRunning() && !hyperengine::rdoc::isTargetControlConnected())) {
 					std::thread([](){
 #ifdef _WIN32
 						CHAR pf[MAX_PATH];
@@ -1584,8 +1733,29 @@ struct Engine final {
 
 							glm::mat4 cameraProjection = glm::perspective(glm::radians(cameraCamera->fov), static_cast<float>(mViewportSize.x) / static_cast<float>(mViewportSize.y), cameraCamera->clippingPlanes.x, cameraCamera->clippingPlanes.y);
 
-							if (ImGuizmo::Manipulate(glm::value_ptr(glm::inverse(cameraTransform->get())), glm::value_ptr(cameraProjection), mOperation, mMode, glm::value_ptr(matrix)))
+							if (ImGuizmo::Manipulate(glm::value_ptr(glm::inverse(cameraTransform->get())), glm::value_ptr(cameraProjection), mOperation, mMode, glm::value_ptr(matrix))) {
 								gameObject.transform.set(matrix);
+
+								glm::vec2 vec = std::bit_cast<glm::vec2>(ImGui::GetIO().MouseDelta) * 3.0f;
+								vec.y *= -1.0f;
+								//vec /= glm::vec2(mViewportSize);
+								//vec *= 2.0f;
+								//vec -= 1.0f;
+								glm::vec4 result = glm::inverse(mUniformEngineData.projection) * glm::vec4(vec, 0.0f, 0.0f);
+								result = glm::inverse(mUniformEngineData.view) * result;
+
+								
+
+								auto* physics = mRegistry.try_get<PhysicsComponent>(mSelected);
+								if (physics) {
+									btTransform trans;
+									physics->mMotionState->getWorldTransform(trans);
+									physics->mBody->setWorldTransform(trans);
+									physics->mBody->activate();
+									physics->mBody->clearForces();
+									physics->mBody->setLinearVelocity(btVector3(result.x, result.y, result.z));
+								}
+							}
 						}
 
 						// Move camera in scene
@@ -1648,6 +1818,8 @@ struct Engine final {
 	ResourceManager mResourceManager;
 	entt::entity mSelected = entt::null;
 	entt::entity mRoot = entt::null;
+	PhysicsWorld mPhysicsWorld;
+
 
 	GLuint mEngineUniformBuffer = 0;
 	UniformEngineData mUniformEngineData;
@@ -1709,11 +1881,13 @@ protected:
 	void flush_() override {}
 };
 
+
+
 int main(int argc, char* argv[]) {
 	TracySetProgramName("HyperEngine");
 	spdlog::default_logger()->sinks().push_back(std::make_shared<my_sink<std::mutex>>());
 	spdlog::set_level(spdlog::level::trace);
-	hyperengine::setupRenderDoc(true);
+	hyperengine::rdoc::setup(true);
 
 	Engine engine;
 	engine.run();
