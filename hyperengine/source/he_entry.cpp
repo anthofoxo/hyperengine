@@ -197,6 +197,7 @@ struct GameObjectComponent final {
 		name = ss.str();
 	}
 
+	// unused rn
 	entt::entity parent = entt::null;
 	entt::entity first = entt::null;
 	entt::entity prev = entt::null;
@@ -350,37 +351,6 @@ static std::array<glm::vec3, 8> getSystemSpaceNdcExtremes(glm::mat4 const& matri
 	return corners;
 }
 
-void imguiInputText(char const* label, std::string& value, float columnWidth = 100.0f) {
-	ImGui::PushID(label);
-	ImGui::Columns(2, nullptr, false);
-	ImGui::SetColumnWidth(0, columnWidth);
-	ImGui::Text(label);
-	ImGui::NextColumn();
-	ImGui::PushItemWidth(ImGui::CalcItemWidth());
-	ImGui::InputText("##Text", &value);
-	ImGui::SameLine();
-	ImGui::PopItemWidth();
-	ImGui::Columns(1);
-	ImGui::PopID();
-}
-
-void imguiLabelText(char const* label, char const* fmt, float columnWidth = 100.0f, ...) {
-	va_list args;
-	va_start(args, fmt);
-	ImGui::PushID(label);
-	ImGui::Columns(2, nullptr, false);
-	ImGui::SetColumnWidth(0, columnWidth);
-	ImGui::Text(label);
-	ImGui::NextColumn();
-	ImGui::PushItemWidth(ImGui::CalcItemWidth());
-	ImGui::LabelTextV("##Text", fmt, args);
-	ImGui::SameLine();
-	ImGui::PopItemWidth();
-	ImGui::Columns(1);
-	ImGui::PopID();
-	va_end(args);
-}
-
 bool drawVec3Control(char const* label, glm::vec3& values, float resetValue = 0.0f, bool placeDummy = true, float columnWidth = 100.0f) {
 	bool edited = false;
 
@@ -447,9 +417,11 @@ static bool canPerformGlobalBinding(ImGuiKeyChord chord) {
 	return !isRouted && ImGui::IsKeyChordPressed(chord);
 }
 
+
 class PhysicsWorld final {
 public:
 	PhysicsWorld(btVector3 gravity = btVector3(0, -10, 0)) {
+		ZoneScoped;
 		mCollisionConfiguration = std::make_unique<btDefaultCollisionConfiguration>();
 		mDispatcher = std::make_unique<btCollisionDispatcher>(mCollisionConfiguration.get());
 		mPairCache = std::make_unique<btDbvtBroadphase>(); // can also try btAxis3Sweep
@@ -471,7 +443,7 @@ public:
 };
 
 
-ATTRIBUTE_ALIGNED16(struct) EngineMotionState : public btMotionState{
+ATTRIBUTE_ALIGNED16(struct) EngineMotionState : public btMotionState {
 	entt::handle mHandle;
 
 	BT_DECLARE_ALIGNED_ALLOCATOR();
@@ -511,6 +483,42 @@ struct PhysicsComponent final {
 	std::unique_ptr<EngineMotionState> mMotionState;
 	bool attached = false;
 
+	float mass = 1.0f;
+	glm::vec3 halfExtents = { 1.0f, 1.0f, 1.0f };
+	float scale = 1.0f;
+
+	void updateShape(PhysicsWorld& world) {
+		detach(world);
+
+		mShape = std::make_unique<btBoxShape>(btVector3(halfExtents.x, halfExtents.y, halfExtents.z));
+		mShape->setLocalScaling(btVector3(scale, scale, scale));
+
+		btVector3 localInertia = btVector3(0, 0, 0);
+		if (mass > 0.0f) mShape->calculateLocalInertia(mass, localInertia);
+
+		mBody->setCollisionShape(mShape.get());
+		mBody->setMassProps(mass, localInertia);
+		mBody->updateInertiaTensor();
+
+		attach(world);
+	}
+
+	void setup(PhysicsWorld& world, entt::handle entityHandle) {
+		mMotionState = std::make_unique<EngineMotionState>(entityHandle);
+
+		mShape = std::make_unique<btBoxShape>(btVector3(halfExtents.x, halfExtents.y, halfExtents.z));
+		mShape->setLocalScaling(btVector3(scale, scale, scale));
+
+		btVector3 localInertia = btVector3(0, 0, 0);
+		if (mass > 0.0f) mShape->calculateLocalInertia(mass, localInertia);
+
+		auto info = btRigidBody::btRigidBodyConstructionInfo{ mass, mMotionState.get(), mShape.get(), localInertia };
+		info.m_linearDamping = 0.2f;
+		info.m_angularDamping = 0.2f;
+		info.m_restitution = 0.4f;
+		mBody = std::make_unique<btRigidBody>(info);
+		attach(world);
+	}
 };
 
 struct Engine final {
@@ -639,7 +647,7 @@ struct Engine final {
 	void run() {
 		init();
 
-		glGenVertexArrays(1, &mEmptyVao);
+		mEmptyMesh = {{ .origin = "Empty Mesh" }};
 
 		while (mRunning) {
 			glfwPollEvents();
@@ -660,8 +668,6 @@ struct Engine final {
 			TracyGpuCollect;
 			FrameMark;
 		}
-
-		glDeleteVertexArrays(1, &mEmptyVao);
 
 		destroyImGui();
 		mAudioEngine.uninit();
@@ -690,9 +696,8 @@ struct Engine final {
 			if (mSelected != entt::null) {
 
 				bool hasGameObject = drawComponentEditGui<GameObjectComponent, Engine>(mRegistry, mSelected, "Game Object", this, [](auto& comp, auto* ptr) {
-					imguiInputText("Name", comp.name);
-
-					imguiLabelText("Uuid", "%p", 100, (uint64_t)comp.uuid);
+					ImGui::InputText("Name", &comp.name);
+					ImGui::LabelText("Uuid", "%p", (uint64_t)comp.uuid);
 					if (ImGui::SmallButton("Copy Uuid")) {
 						std::string formatted = std::format("0x{:016x}", (uint64_t)comp.uuid);
 						ImGui::SetClipboardText(formatted.c_str());
@@ -717,9 +722,11 @@ struct Engine final {
 					if (edited) {
 						auto* physics = ptr->mRegistry.try_get<PhysicsComponent>(ptr->mSelected);
 						if (physics) {
-							btTransform trans;
-							physics->mMotionState->getWorldTransform(trans);
-							physics->mBody->setWorldTransform(trans);
+							if (ptr->mOperation == ImGuizmo::TRANSLATE) {
+								btTransform trans;
+								physics->mMotionState->getWorldTransform(trans);
+								physics->mBody->setWorldTransform(trans);
+							}
 							physics->mBody->activate();
 							physics->mBody->clearForces();
 						}
@@ -1166,11 +1173,11 @@ struct Engine final {
 		{
 			entt::entity entity = mRegistry.create();
 			auto& gameObject = mRegistry.emplace<GameObjectComponent>(entity);
-			gameObject.transform.scale = { 30, 30, 30 };
+			gameObject.transform.scale = { 0, 0, 0 };
 			auto& comp = mRegistry.emplace<PhysicsComponent>(entity);
 			auto& meshFilter = mRegistry.emplace<MeshFilterComponent>(entity);
 			meshFilter.mesh = mResourceManager.getMesh("plane.obj");
-			comp.mShape = std::make_unique<btStaticPlaneShape>(btVector3(0, 1, 0), 0);
+			comp.mShape = std::make_unique<btStaticPlaneShape>(btVector3(0, 1, 0), 0.0f);
 			auto& meshRenderer = mRegistry.emplace<MeshRendererComponent>(entity);
 			meshRenderer.shader = mResourceManager.getShaderProgram("shaders/opaque.glsl", mFileErrors);
 			if (meshRenderer.shader) {
@@ -1187,13 +1194,19 @@ struct Engine final {
 			info.m_angularDamping = .2f;
 			info.m_restitution = 1.0f;
 			comp.mBody = std::make_unique<btRigidBody>(info);
+
+			// Adjust shape realtime
+			// comp.detach(mPhysicsWorld);
+			// comp.mBody->setCollisionShape(shape);
+			// comp.mBody->setMassProps(mass, inertia);
+			// comp.attach(mPhysicsWorld);
+
 			comp.attach(mPhysicsWorld);
 		}
 		for (int y = 0; y < 20; ++y) {
 			entt::entity entity = mRegistry.create();
 			auto& gameObject = mRegistry.emplace<GameObjectComponent>(entity);
 			gameObject.transform.translation = { 0, 5 * y + 5, 0 };
-			auto& comp = mRegistry.emplace<PhysicsComponent>(entity);
 			auto& meshFilter = mRegistry.emplace<MeshFilterComponent>(entity);
 			meshFilter.mesh = mResourceManager.getMesh("cube.obj");
 			auto& meshRenderer = mRegistry.emplace<MeshRendererComponent>(entity);
@@ -1203,17 +1216,9 @@ struct Engine final {
 				*((glm::vec3*)meshRenderer.data.data()) = glm::vec3(1.0f);
 				meshRenderer.textures[meshRenderer.shader->opaqueAssignments().at("tAlbedo")] = mResourceManager.getTexture("rocks.png");
 			}
-			comp.mShape = std::make_unique<btBoxShape>(btVector3(1.0f, 1.0f, 1.0f));
-			btScalar mass = 1.0f;
-			btVector3 localInertia(0, 0, 0);
-			if (mass > 0.0f) comp.mShape->calculateLocalInertia(mass, localInertia);
-			comp.mMotionState = std::make_unique<EngineMotionState>(entt::handle(mRegistry, entity));
-			auto info = btRigidBody::btRigidBodyConstructionInfo{ mass, comp.mMotionState.get(), comp.mShape.get(), localInertia };
-			info.m_linearDamping = .2f;
-			info.m_angularDamping = .2f;
-			info.m_restitution = 0.5f;
-			comp.mBody = std::make_unique<btRigidBody>(info);
-			comp.attach(mPhysicsWorld);
+
+			auto& comp = mRegistry.emplace<PhysicsComponent>(entity);
+			comp.setup(mPhysicsWorld, entt::handle(mRegistry, entity));
 		}
 	}
 
@@ -1650,14 +1655,14 @@ struct Engine final {
 		if (mWireframe) glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
 
 		// Tonemap // aces
-		glBindVertexArray(mEmptyVao);
+
 		mPostFramebuffer.bind();
 		glDisable(GL_CULL_FACE);
 		glDisable(GL_DEPTH_TEST);
 
 		mAcesProgram->bind();
 		mFramebufferColor.bind(0);
-		glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+		mEmptyMesh.draw(GL_TRIANGLE_STRIP, 0, 4);
 
 		glEnable(GL_DEPTH_TEST);
 		glEnable(GL_CULL_FACE);
@@ -1820,7 +1825,6 @@ struct Engine final {
 	entt::entity mRoot = entt::null;
 	PhysicsWorld mPhysicsWorld;
 
-
 	GLuint mEngineUniformBuffer = 0;
 	UniformEngineData mUniformEngineData;
 
@@ -1849,7 +1853,7 @@ struct Engine final {
 	ImGuizmo::OPERATION mOperation = ImGuizmo::OPERATION::TRANSLATE;
 	ImGuizmo::MODE mMode = ImGuizmo::MODE::LOCAL;
 
-	GLuint mEmptyVao = 0;
+	hyperengine::Mesh mEmptyMesh;
 
 	std::shared_ptr<hyperengine::ShaderProgram> mShadowProgram;
 	std::shared_ptr<hyperengine::ShaderProgram> mAcesProgram;
@@ -1859,34 +1863,38 @@ struct Engine final {
 	std::shared_ptr<hyperengine::Texture> mInternalTextureCheckerboard;
 };
 
-template<typename Mutex>
-class my_sink : public spdlog::sinks::base_sink <Mutex> {
-protected:
-	void sink_it_(const spdlog::details::log_msg& msg) override {
-		spdlog::memory_buf_t formatted;
-		spdlog::sinks::base_sink<Mutex>::formatter_->format(msg, formatted);
+namespace {
+	template<typename Mutex>
+	class HyperEngineSink : public spdlog::sinks::base_sink<Mutex> {
+	protected:
+		void sink_it_(spdlog::details::log_msg const& msg) override {
+			spdlog::memory_buf_t formatted;
+			spdlog::sinks::base_sink<Mutex>::formatter_->format(msg, formatted);
 
-		constexpr ImVec4 colors[] = {
-			{ 204.0f / 255.0f, 204.0f / 255.0f, 204.0f / 255.0f, 1.0f },
-			{  58.0f / 255.0f, 150.0f / 255.0f, 221.0f / 255.0f, 1.0f },
-			{  19.0f / 255.0f, 161.0f / 255.0f,  14.0f / 255.0f, 1.0f },
-			{ 249.0f / 255.0f, 241.0f / 255.0f, 165.0f / 255.0f, 1.0f },
-			{ 231.0f / 255.0f,  72.0f / 255.0f,  86.0f / 255.0f, 1.0f },
-			{ 197.0f / 255.0f,  15.0f / 255.0f,  31.0f / 255.0f, 1.0f }
-		};
-		
-		hyperengine::getConsole().addLog(fmt::to_string(formatted), colors[msg.level - spdlog::level::trace]);
+			ImVec4 constexpr colors[] = {
+				{ 204.0f / 255.0f, 204.0f / 255.0f, 204.0f / 255.0f, 1.0f },
+				{  58.0f / 255.0f, 150.0f / 255.0f, 221.0f / 255.0f, 1.0f },
+				{  19.0f / 255.0f, 161.0f / 255.0f,  14.0f / 255.0f, 1.0f },
+				{ 249.0f / 255.0f, 241.0f / 255.0f, 165.0f / 255.0f, 1.0f },
+				{ 231.0f / 255.0f,  72.0f / 255.0f,  86.0f / 255.0f, 1.0f },
+				{ 197.0f / 255.0f,  15.0f / 255.0f,  31.0f / 255.0f, 1.0f }
+			};
+
+			hyperengine::getConsole().addLog(fmt::to_string(formatted), colors[msg.level - spdlog::level::trace]);
+		}
+
+		void flush_() override {}
+	};
+
+	void setupLogger() {
+		spdlog::default_logger()->sinks().push_back(std::make_shared<HyperEngineSink<std::mutex>>());
+		spdlog::set_level(spdlog::level::trace);
 	}
-
-	void flush_() override {}
-};
-
-
+}
 
 int main(int argc, char* argv[]) {
 	TracySetProgramName("HyperEngine");
-	spdlog::default_logger()->sinks().push_back(std::make_shared<my_sink<std::mutex>>());
-	spdlog::set_level(spdlog::level::trace);
+	setupLogger();
 	hyperengine::rdoc::setup(true);
 
 	Engine engine;

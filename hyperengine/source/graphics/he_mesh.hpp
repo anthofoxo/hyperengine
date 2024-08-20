@@ -16,9 +16,9 @@ namespace hyperengine {
 
 		struct CreateInfo final {
 			std::span<const std::byte> vertices;
-			GLsizei vertexStride;
+			GLsizei vertexStride = 0;
 			std::span<const std::byte> elements;
-			size_t elementStride;
+			size_t elementStride = 0;
 			std::span<const Attribute> attributes;
 			std::string_view origin;
 		};
@@ -33,7 +33,7 @@ namespace hyperengine {
 		Mesh& operator=(Mesh&& other) noexcept;
 		~Mesh() noexcept;
 
-		void draw();
+		void draw(GLenum mode = GL_TRIANGLES, GLint first = 0, GLsizei count = -1);
 	private:
 		std::string mOrigin;
 		GLuint mVao = 0, mVbo = 0, mEbo = 0;

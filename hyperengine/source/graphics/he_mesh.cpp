@@ -5,21 +5,27 @@ namespace hyperengine {
 		if (GLAD_GL_ARB_direct_state_access) {
 			glCreateVertexArrays(1, &mVao);
 
-			glCreateBuffers(1, &mVbo);
-			glNamedBufferStorage(mVbo, info.vertices.size_bytes(), info.vertices.data(), 0);
-
-			glCreateBuffers(1, &mEbo);
-			glNamedBufferStorage(mEbo, info.elements.size_bytes(), info.elements.data(), 0);
-
 			constexpr GLuint bindingIndex = 0;
-			glVertexArrayVertexBuffer(mVao, bindingIndex, mVbo, 0, info.vertexStride);
-			glVertexArrayElementBuffer(mVao, mEbo);
 
-			for (size_t i = 0; i < info.attributes.size(); ++i) {
-				auto const& attribute = info.attributes[i];
-				glEnableVertexArrayAttrib(mVao, static_cast<GLuint>(i));
-				glVertexArrayAttribFormat(mVao, static_cast<GLuint>(i), attribute.size, attribute.type, GL_FALSE, attribute.offset);
-				glVertexArrayAttribBinding(mVao, static_cast<GLuint>(i), bindingIndex);
+			if (info.vertices.size_bytes() > 0 && info.attributes.size() > 0) {
+				glCreateBuffers(1, &mVbo);
+				glNamedBufferStorage(mVbo, info.vertices.size_bytes(), info.vertices.data(), 0);
+				glVertexArrayVertexBuffer(mVao, bindingIndex, mVbo, 0, info.vertexStride);
+			}
+
+			if (info.elements.size_bytes() > 0) {
+				glCreateBuffers(1, &mEbo);
+				glNamedBufferStorage(mEbo, info.elements.size_bytes(), info.elements.data(), 0);
+				glVertexArrayElementBuffer(mVao, mEbo);
+			}
+
+			if (info.vertices.size_bytes() > 0) {
+				for (size_t i = 0; i < info.attributes.size(); ++i) {
+					auto const& attribute = info.attributes[i];
+					glEnableVertexArrayAttrib(mVao, static_cast<GLuint>(i));
+					glVertexArrayAttribFormat(mVao, static_cast<GLuint>(i), attribute.size, attribute.type, GL_FALSE, attribute.offset);
+					glVertexArrayAttribBinding(mVao, static_cast<GLuint>(i), bindingIndex);
+				}
 			}
 		}
 		else {
@@ -35,18 +41,24 @@ namespace hyperengine {
 			glGenVertexArrays(1, &mVao);
 			glBindVertexArray(mVao);
 
-			glGenBuffers(1, &mVbo);
-			glBindBuffer(GL_ARRAY_BUFFER, mVbo);
-			glBufferData(GL_ARRAY_BUFFER, info.vertices.size() * sizeof(decltype(info.vertices)::value_type), info.vertices.data(), GL_STATIC_DRAW);
+			if (info.vertices.size_bytes() > 0) {
+				glGenBuffers(1, &mVbo);
+				glBindBuffer(GL_ARRAY_BUFFER, mVbo);
+				glBufferData(GL_ARRAY_BUFFER, info.vertices.size() * sizeof(decltype(info.vertices)::value_type), info.vertices.data(), GL_STATIC_DRAW);
+			}
 
-			glGenBuffers(1, &mEbo);
-			glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, mEbo);
-			glBufferData(GL_ELEMENT_ARRAY_BUFFER, info.elements.size() * sizeof(decltype(info.elements)::value_type), info.elements.data(), GL_STATIC_DRAW);
+			if (info.elements.size_bytes() > 0) {
+				glGenBuffers(1, &mEbo);
+				glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, mEbo);
+				glBufferData(GL_ELEMENT_ARRAY_BUFFER, info.elements.size() * sizeof(decltype(info.elements)::value_type), info.elements.data(), GL_STATIC_DRAW);
+			}
 
-			for (size_t i = 0; i < info.attributes.size(); ++i) {
-				auto const& attribute = info.attributes[i];
-				glEnableVertexAttribArray(static_cast<GLuint>(i));
-				glVertexAttribPointer(static_cast<GLuint>(i), attribute.size, attribute.type, GL_FALSE, info.vertexStride, (void const*)(uintptr_t)attribute.offset);
+			if (info.vertices.size_bytes() > 0) {
+				for (size_t i = 0; i < info.attributes.size(); ++i) {
+					auto const& attribute = info.attributes[i];
+					glEnableVertexAttribArray(static_cast<GLuint>(i));
+					glVertexAttribPointer(static_cast<GLuint>(i), attribute.size, attribute.type, GL_FALSE, info.vertexStride, (void const*)(uintptr_t)attribute.offset);
+				}
 			}
 
 			// Pop state
@@ -56,19 +68,32 @@ namespace hyperengine {
 			//
 		}
 
-		switch (info.elementStride) {
-		case 1:
-			mType = GL_UNSIGNED_BYTE;
-			break;
-		case 2:
-			mType = GL_UNSIGNED_SHORT;
-			break;
-		default:
-			mType = GL_UNSIGNED_INT;
+		if (info.elements.size_bytes() > 0) {
+			switch (info.elementStride) {
+			case 1:
+				mType = GL_UNSIGNED_BYTE;
+				break;
+			case 2:
+				mType = GL_UNSIGNED_SHORT;
+				break;
+			default:
+				mType = GL_UNSIGNED_INT;
+			}
+		}
+		else {
+			mType = 0;
 		}
 
-		mCount = static_cast<GLsizei>(info.elements.size());
 
+		if (info.elements.size_bytes() > 0) {
+			mCount = static_cast<GLsizei>(info.elements.size_bytes() / info.elementStride);
+		}
+		else if (info.vertices.size_bytes() > 0) {
+			mCount = static_cast<GLsizei>(info.vertices.size_bytes() / info.vertexStride);
+		}
+		else
+			mCount = 0;
+			
 		mOrigin = std::string(info.origin);
 	}
 
@@ -91,8 +116,19 @@ namespace hyperengine {
 			glDeleteVertexArrays(1, &mVao);
 	}
 
-	void Mesh::draw() {
+	void Mesh::draw(GLenum mode, GLint first, GLsizei count) {
+		if (count == -1) count = mCount;
+
 		glBindVertexArray(mVao);
-		glDrawElements(GL_TRIANGLES, mCount, mType, nullptr);
+		if (mEbo == 0)
+			glDrawArrays(mode, first, count);
+		else {
+			int stride;
+			if (mType == GL_UNSIGNED_BYTE) stride = 1;
+			else if (mType == GL_UNSIGNED_SHORT) stride = 2;
+			else stride = 4;
+
+			glDrawElements(mode, count, mType, (void const*)(uintptr_t)(first * stride));
+		}
 	}
 }

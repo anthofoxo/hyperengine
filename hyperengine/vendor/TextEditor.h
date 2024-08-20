@@ -49,7 +49,7 @@ public:
 	inline bool IsShowLineNumbersEnabled() const { return mShowLineNumbers; }
 	inline void SetShortTabsEnabled(bool aValue) { mShortTabs = aValue; }
 	inline bool IsShortTabsEnabled() const { return mShortTabs; }
-	inline int GetLineCount() const { return mLines.size(); }
+	inline size_t GetLineCount() const { return mLines.size(); }
 	inline bool IsOverwriteEnabled() const { return mOverwrite; }
 	void SetPalette(PaletteId aValue);
 	PaletteId GetPalette() const { return mPaletteId; }
