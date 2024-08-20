@@ -1,0 +1,13 @@
+diff --git a/backends/imgui_impl_vulkan.h b/backends/imgui_impl_vulkan.h
+index 2358d668..5cd49d97 100644
+--- a/backends/imgui_impl_vulkan.h
++++ b/backends/imgui_impl_vulkan.h
+@@ -58,7 +58,7 @@
+ #ifdef IMGUI_IMPL_VULKAN_USE_VOLK
+ #include <volk.h>
+ #else
+-#include <vulkan/vulkan.h>
++#include <glad/vulkan.h>
+ #endif
+ #if defined(VK_VERSION_1_3) || defined(VK_KHR_dynamic_rendering)
+ #define IMGUI_IMPL_VULKAN_HAS_DYNAMIC_RENDERING
