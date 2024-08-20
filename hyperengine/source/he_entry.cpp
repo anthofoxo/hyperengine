@@ -1896,9 +1896,13 @@ int main(int argc, char* argv[]) {
 	TracySetProgramName("HyperEngine");
 	setupLogger();
 	hyperengine::rdoc::setup(true);
-
+#if 0
 	Engine engine;
 	engine.run();
+#else
+	extern int vulkanMain();
+	vulkanMain();
+#endif
 
 	spdlog::shutdown();
     return 0;
