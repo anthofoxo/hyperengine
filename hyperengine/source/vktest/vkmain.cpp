@@ -14,11 +14,9 @@
 #include <assimp/scene.h>
 #include <assimp/postprocess.h>
 
-#include <iostream>
 #include <fstream>
 #include <stdexcept>
 #include <algorithm>
-#include <chrono>
 #include <vector>
 #include <cstring>
 #include <cstdlib>
@@ -31,8 +29,8 @@
 
 #include <spdlog/spdlog.h>
 
-const uint32_t WIDTH = 800;
-const uint32_t HEIGHT = 600;
+const uint32_t WIDTH = 1280;
+const uint32_t HEIGHT = 720;
 
 const std::string MODEL_PATH = "barrel.obj";
 const std::string TEXTURE_PATH = "barrel.png";
@@ -46,6 +44,10 @@ const std::vector<const char*> validationLayers = {
 const std::vector<const char*> deviceExtensions = {
     VK_KHR_SWAPCHAIN_EXTENSION_NAME
 };
+
+#if _DEBUG == 1
+#   define NDEBUG 1
+#endif
 
 #ifdef NDEBUG
 const bool enableValidationLayers = false;
@@ -1101,12 +1103,12 @@ private:
         aiScene const* scene = import.ReadFile(MODEL_PATH.c_str(), aiProcess_JoinIdenticalVertices | aiProcess_CalcTangentSpace | aiProcess_GenSmoothNormals | aiProcess_GenUVCoords | aiProcess_Triangulate | aiProcess_RemoveComponent | aiProcess_OptimizeGraph | aiProcess_OptimizeMeshes | aiProcess_ImproveCacheLocality | aiProcess_FixInfacingNormals);
 
         if (!scene || scene->mFlags & AI_SCENE_FLAGS_INCOMPLETE || !scene->mRootNode) {
-            std::cerr << import.GetErrorString() << '\n';
+            spdlog::error(import.GetErrorString());
             return;
         }
 
         if (scene->mNumMeshes != 1) {
-            std::cerr << "Only one mesh can be exported currently\n";
+            spdlog::error("Only one mesh can be exported currently");
             return;
         }
 
@@ -1437,14 +1439,9 @@ private:
     }
 
     void updateUniformBuffer(uint32_t currentImage) {
-        static auto startTime = std::chrono::high_resolution_clock::now();
-
-        auto currentTime = std::chrono::high_resolution_clock::now();
-        float time = std::chrono::duration<float, std::chrono::seconds::period>(currentTime - startTime).count();
-
         UniformBufferObject ubo{};
-        ubo.model = glm::rotate(glm::mat4(1.0f), time * glm::radians(90.0f), glm::vec3(0.0f, 0.0f, 1.0f));
-        ubo.view = glm::lookAt(glm::vec3(10.0f, 10.0f, 10.0f), glm::vec3(0.0f, 0.0f, 0.0f), glm::vec3(0.0f, 0.0f, 1.0f));
+        ubo.model = glm::rotate(glm::mat4(1.0f), (float)glfwGetTime() * glm::radians(90.0f), glm::vec3(0.0f, 1.0f, 0.0f));
+        ubo.view = glm::lookAt(glm::vec3(20.0f, 10.0f, 20.0f), glm::vec3(0.0f, 0.0f, 0.0f), glm::vec3(0.0f, 1.0f, 0.0f));
         ubo.proj = glm::perspective(glm::radians(45.0f), swapChainExtent.width / (float)swapChainExtent.height, 0.1f, 100.0f);
         ubo.proj[1][1] *= -1;
 
@@ -1718,7 +1715,26 @@ private:
     }
 
     static VKAPI_ATTR VkBool32 VKAPI_CALL debugCallback(VkDebugUtilsMessageSeverityFlagBitsEXT messageSeverity, VkDebugUtilsMessageTypeFlagsEXT messageType, const VkDebugUtilsMessengerCallbackDataEXT* pCallbackData, void* pUserData) {
-        std::cerr << "validation layer: " << pCallbackData->pMessage << std::endl;
+        spdlog::level::level_enum level;
+
+        switch (messageSeverity) {
+        case VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT:
+            level = spdlog::level::trace;
+            break;
+        case VK_DEBUG_UTILS_MESSAGE_SEVERITY_INFO_BIT_EXT:
+            level = spdlog::level::debug;
+            break;
+        case VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT:
+            level = spdlog::level::warn;
+            break;
+        case VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT:
+            level = spdlog::level::err;
+            break;
+        default:
+            std::unreachable();
+        }
+
+        spdlog::log(level, pCallbackData->pMessage);
 
         return VK_FALSE;
     }
@@ -1731,7 +1747,7 @@ int vulkanMain() {
         app.run();
     }
     catch (const std::exception& e) {
-        std::cerr << e.what() << std::endl;
+        spdlog::critical(e.what());
         return EXIT_FAILURE;
     }
 
