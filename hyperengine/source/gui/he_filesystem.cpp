@@ -7,12 +7,14 @@
 #include <glm/glm.hpp>
 #include "graphics/he_texture.hpp"
 
+#include "he_texteditor.hpp"
+
 namespace hyperengine::gui {
 	void Filesystem::queueUpdate() {
 		mAwaitingUpdate = true;
 	}
 
-	void Filesystem::draw(bool* pOpen, ResourceManager& resourceManager, std::unordered_map<std::u8string, TextEditor>& textEditors) {
+	void Filesystem::draw(bool* pOpen, ResourceManager& resourceManager) {
 		if (*pOpen == false) return;
 
 		constexpr float targetThumbnailSize = 64.0f;
@@ -89,33 +91,9 @@ namespace hyperengine::gui {
 						ImGui::PushStyleColor(ImGuiCol_ButtonActive, { 1.0f, 1.0f, 1.0f, 0.4f });
 						ImGui::PushStyleColor(ImGuiCol_ButtonHovered, { 1.0f, 1.0f, 1.0f, 0.2f });
 						if (ImGui::ImageButton((ImTextureID)(uintptr_t)texture->handle(), { targetThumbnailSize, targetThumbnailSize }, { 0, 1 }, { 1, 0 })) {
-							std::u8string target = std::u8string(path.c_str() + 2, path.size() - 2);
-							auto it = textEditors.find(target);
-							// File is not opened, open it
-							if (it == textEditors.end()) {
-								bool acceptable = true;
-
-								if (extension == u8".png")
-									acceptable = false;
-								if (extension == u8".ttf")
-									acceptable = false;
-
-								if (acceptable) {
-									TextEditor editor;
-									editor.SetTabSize(2);
-
-									if (extension == u8".lua")
-										editor.SetLanguageDefinition(TextEditor::LanguageDefinitionId::Lua);
-									else if (extension == u8".glsl")
-										editor.SetLanguageDefinition(TextEditor::LanguageDefinitionId::Glsl);
-
-									auto optContent = readFileString((char const*)path.c_str());
-									if (optContent) {
-										editor.SetText(optContent.value());
-										textEditors[target] = editor;
-									}
-								}
-							}
+							std::string target = std::string((char const*)path.c_str() + 2, path.size() - 2);
+							std::string stdextension = std::string((char const*)extension.c_str(), extension.size());
+							hyperengine::gui::spawnTextEditor(target, stdextension);
 						}
 						ImGui::PopStyleColor(3);
 

@@ -12,7 +12,7 @@
 namespace hyperengine::gui {
 	class Filesystem final {
 	public:
-		void draw(bool* pOpen, ResourceManager& resourceManager, std::unordered_map<std::u8string, TextEditor>& textEditors);
+		void draw(bool* pOpen, ResourceManager& resourceManager);
 		void queueUpdate();
 	private:
 		std::set<std::u8string> mDirectories;

@@ -20,6 +20,7 @@
 #include <regex>
 
 #include "gui/he_console.hpp"
+#include "gui/he_texteditor.hpp"
 
 #include <btBulletDynamicsCommon.h>
 
@@ -124,7 +125,7 @@ struct Transform final {
 	}
 };
 
-std::unordered_map<std::string, ImFont*> fonts;
+static std::unordered_map<std::string, ImFont*> fonts;
 
 static void initImGui(hyperengine::Window& window) {
 	IMGUI_CHECKVERSION();
@@ -1324,7 +1325,7 @@ struct Engine final {
 
 		hyperengine::getConsole().draw(&mViews.console);
 
-		mGuiFilesystem.draw(&mViews.filesystem, mResourceManager, mTextEditors);
+		mGuiFilesystem.draw(&mViews.filesystem, mResourceManager);
 
 		if (ImGui::Begin("Debug")) {
 			ImGui::SeparatorText("GPU Info");
@@ -1380,103 +1381,10 @@ struct Engine final {
 			ImGui::End();
 		}
 
-		if (!mTextEditors.empty()) {
-			bool opened = true;
-
-			ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, { 0, 0 });
-			ImGui::Begin("Text Editors", &opened, ImGuiWindowFlags_MenuBar);
-			ImGui::PopStyleVar();
-
-			{
-				bool saveCurrentDoc = false;
-				bool saveAll = false;
-
-				if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_S)) {
-					saveCurrentDoc = true;
-				}
-
-				if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiMod_Shift | ImGuiKey_S)) {
-					saveAll = true;
-				}
-
-				int line = 0, column = 0, lineCount = 0;
-				bool overwriteEnabled = false;
-				std::string defName;
-
-				if (ImGui::BeginMenuBar()) {
-					if (ImGui::BeginMenu("File")) {
-						if (ImGui::MenuItem("Save", ImGui::GetKeyChordName(ImGuiMod_Ctrl | ImGuiKey_S))) saveCurrentDoc = true;
-						if (ImGui::MenuItem("Save All", ImGui::GetKeyChordName(ImGuiMod_Ctrl | ImGuiMod_Shift | ImGuiKey_S))) saveAll = true;
-
-						ImGui::EndMenu();
-					}
-
-					ImGui::EndMenuBar();
-				}
-
-				if (ImGui::BeginTabBar("TextEditorsTabs", ImGuiTabBarFlags_Reorderable | ImGuiTabBarFlags_AutoSelectNewTabs)) {
-
-					std::u8string toClose;
-
-					for (auto& [k, v] : mTextEditors) {
-						bool opened = true;
-
-						ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, { 0, 0 });
-
-						ImGuiTabItemFlags flags = ImGuiTabItemFlags_None;
-
-						if (mTextEditorsAdditionalState[k].undoIndexInDisc != v.GetUndoIndex())
-							flags |= ImGuiTabItemFlags_UnsavedDocument;
-
-						if (ImGui::BeginTabItem((char const*)k.c_str(), &opened, flags)) {
-
-							v.GetCursorPosition(line, column);
-							lineCount = v.GetLineCount();
-							overwriteEnabled = v.IsOverwriteEnabled();
-							defName = v.GetLanguageDefinitionName();
-
-							ImVec2 availContent = ImGui::GetContentRegionAvail();
-							availContent.y -= ImGui::GetFontSize() + ImGui::GetStyle().ItemSpacing.y * 2.0f;
-
-							ImGui::PushFont(fonts["mono"]);
-							v.Render((char const*)k.c_str(), false, availContent);
-							ImGui::PopFont();
-
-							if (saveCurrentDoc) {
-								hyperengine::writeFile((char const*)k.c_str(), v.GetText().data(), v.GetText().size());
-								mGuiFilesystem.queueUpdate();
-								mTextEditorsAdditionalState[k].undoIndexInDisc = v.GetUndoIndex();
-							}
-
-							ImGui::EndTabItem();
-						}
-
-						ImGui::PopStyleVar();
-
-						if (!opened)
-							toClose = k;
-
-						if (saveAll) {
-							hyperengine::writeFile((char const*)k.c_str(), v.GetText().data(), v.GetText().size());
-							mGuiFilesystem.queueUpdate();
-							mTextEditorsAdditionalState[k].undoIndexInDisc = v.GetUndoIndex();
-						}
-					}
-
-					if (!toClose.empty()) {
-						mTextEditors.erase(toClose);
-						mTextEditorsAdditionalState.erase(toClose);
-					}
-
-					ImGui::EndTabBar();
-				}
-
-				ImGui::Text("%6d/%-6d %6d lines | %s | %s", line + 1, column + 1, lineCount, overwriteEnabled ? "Ovr" : "Ins", defName.c_str());
-			}
-			ImGui::End();
-
-			if (!opened)
-				mTextEditors.clear();
+		bool updateFilesystems = false;
+		hyperengine::gui::drawTextEditors(fonts["mono"], &updateFilesystems);
+		if (updateFilesystems) {
+			mGuiFilesystem.queueUpdate();
 		}
 
 		drawGuiResourceManager();
@@ -1833,12 +1741,6 @@ struct Engine final {
 	hyperengine::Texture mFramebufferColor;
 	glm::ivec2 mViewportSize{};
 
-	struct ExtraState {
-		int undoIndexInDisc = 0;
-	};
-
-	std::unordered_map<std::u8string, TextEditor> mTextEditors;
-	std::unordered_map<std::u8string, ExtraState> mTextEditorsAdditionalState;
 	std::unordered_map<std::u8string, std::string> mFileErrors;
 
 	hyperengine::Framebuffer mPostFramebuffer;
@@ -1896,13 +1798,17 @@ int main(int argc, char* argv[]) {
 	TracySetProgramName("HyperEngine");
 	setupLogger();
 	hyperengine::rdoc::setup(true);
-#if 0
-	Engine engine;
-	engine.run();
-#else
-	extern int vulkanMain();
-	vulkanMain();
-#endif
+
+	int option = tinyfd_messageBox("Vulkan Demo?", "Load vulkan demo", "yesno", "question", 1);
+
+	if (option == 1) {
+		extern int vulkanMain();
+		vulkanMain();
+	}
+	else {
+		Engine engine;
+		engine.run();
+	}
 
 	spdlog::shutdown();
     return 0;

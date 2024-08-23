@@ -31,9 +31,14 @@
 
 #include <spdlog/spdlog.h>
 
+
+
 #include <imgui.h>
 #include <backends/imgui_impl_glfw.h>
 #include <backends/imgui_impl_vulkan.h>
+
+static std::unordered_map<std::string, ImFont*> fonts;
+#include "gui/he_texteditor.hpp"
 
 const std::string MODEL_PATH = "barrel.obj";
 const std::string TEXTURE_PATH = "barrel.png";
@@ -310,6 +315,16 @@ public:
         io.ConfigFlags |= ImGuiConfigFlags_ViewportsEnable;     // Enable Multi-Viewport / Platform Windows
         //io.ConfigViewportsNoAutoMerge = true;
         //io.ConfigViewportsNoTaskBarIcon = true;
+
+        ImFont* defaultFont = io.Fonts->AddFontDefault();
+        ImFont* regularFont = io.Fonts->AddFontFromFileTTF("NotoSans-Regular.ttf", 18.0f);
+        ImFont* boldFont = io.Fonts->AddFontFromFileTTF("NotoSans-Bold.ttf", 18.0f);
+        ImFont* monoFont = io.Fonts->AddFontFromFileTTF("NotoSansMono-Regular.ttf", 18.0f);
+        if (regularFont) io.FontDefault = regularFont;
+
+        fonts["regular"] = regularFont ? regularFont : defaultFont;
+        fonts["bold"] = boldFont ? boldFont : defaultFont;
+        fonts["mono"] = monoFont ? monoFont : defaultFont;
 
         // Setup Dear ImGui style
         ImGui::StyleColorsDark();
@@ -1580,6 +1595,25 @@ private:
 
     glm::vec3 objectPos{};
 
+    void drawImGuiContent() {
+        static bool runonce = true;
+
+        if (runonce) {
+            runonce = false;
+            hyperengine::gui::spawnTextEditor("scene.lua", ".lua");
+        }
+
+        ImGui::ShowDemoWindow();
+
+        bool updateFilesystems = false;
+        hyperengine::gui::drawTextEditors(fonts["mono"], &updateFilesystems);
+
+        if (ImGui::Begin("Debug")) {
+            ImGui::DragFloat3("Position", glm::value_ptr(objectPos));
+        }
+        ImGui::End();
+    }
+
     void drawFrame() {
         vkWaitForFences(mContext.device, 1, &inFlightFences[currentFrame], VK_TRUE, UINT64_MAX);
 
@@ -1598,12 +1632,7 @@ private:
         ImGui_ImplGlfw_NewFrame();
         ImGui::NewFrame();
 
-        ImGui::ShowDemoWindow();
-
-        if (ImGui::Begin("Debug")) {
-            ImGui::DragFloat3("Position", glm::value_ptr(objectPos));
-        }
-        ImGui::End();
+        drawImGuiContent();
 
         updateUniformBuffer(currentFrame);
 
