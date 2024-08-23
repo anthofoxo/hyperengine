@@ -31,7 +31,7 @@
 
 #include <spdlog/spdlog.h>
 
-
+#include "graphics/he_window.hpp"
 
 #include <imgui.h>
 #include <backends/imgui_impl_glfw.h>
@@ -354,7 +354,7 @@ public:
         check_vk_result(err);
 
         // Setup Platform/Renderer backends
-        ImGui_ImplGlfw_InitForVulkan(window, true);
+        ImGui_ImplGlfw_InitForVulkan(mWindow.handle(), true);
         ImGui_ImplVulkan_InitInfo init_info = {};
         init_info.Instance = instance;
         init_info.PhysicalDevice = mContext.physicalDevice;
@@ -386,7 +386,7 @@ public:
         cleanup();
     }
 private:
-    GLFWwindow* window;
+    hyperengine::Window mWindow;
 
     VkInstance instance;
     VkDebugUtilsMessengerEXT debugMessenger;
@@ -443,23 +443,17 @@ private:
     bool framebufferResized = false;
 
     void initWindow() {
-        glfwSetErrorCallback([](int error, const char* description) {
-            spdlog::error("GLFW Error {}: {}", error, description);
-        });
+        mWindow = {{
+                .width = 1280,
+                .height = 720,
+                .title = "Vulkan",
+                .maximized = true,
+                .noClientApi = true
 
-        if (!glfwInit()) {
-            throw std::runtime_error("Failed to init glfw");
-        }
+            }};
 
-        glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
-        window = glfwCreateWindow(1280, 720, "Vulkan", nullptr, nullptr);
-
-        if (!glfwVulkanSupported()) {
-            throw std::runtime_error("GLFW: Vulkan Not Supported");
-        }
-
-        glfwSetWindowUserPointer(window, this);
-        glfwSetFramebufferSizeCallback(window, framebufferResizeCallback);
+        glfwSetWindowUserPointer(mWindow.handle(), this);
+        glfwSetFramebufferSizeCallback(mWindow.handle(), &framebufferResizeCallback);
     }
 
     static void framebufferResizeCallback(GLFWwindow* window, int width, int height) {
@@ -499,7 +493,7 @@ private:
     }
 
     void mainLoop() {
-        while (!glfwWindowShouldClose(window)) {
+        while (!glfwWindowShouldClose(mWindow.handle())) {
             glfwPollEvents();
             drawFrame();
         }
@@ -566,17 +560,13 @@ private:
         vkDestroyInstance(instance, nullptr);
 
         gladLoaderUnloadVulkan();
-
-        glfwDestroyWindow(window);
-
-        glfwTerminate();
     }
 
     void recreateSwapChain() {
         int width = 0, height = 0;
-        glfwGetFramebufferSize(window, &width, &height);
+        glfwGetFramebufferSize(mWindow.handle(), &width, &height);
         while (width == 0 || height == 0) {
-            glfwGetFramebufferSize(window, &width, &height);
+            glfwGetFramebufferSize(mWindow.handle(), &width, &height);
             glfwWaitEvents();
         }
 
@@ -658,7 +648,7 @@ private:
     }
 
     void createSurface() {
-        if (glfwCreateWindowSurface(instance, window, nullptr, &surface) != VK_SUCCESS) {
+        if (glfwCreateWindowSurface(instance, mWindow.handle(), nullptr, &surface) != VK_SUCCESS) {
             throw std::runtime_error("failed to create window surface!");
         }
     }
@@ -1737,7 +1727,7 @@ private:
         }
         else {
             int width, height;
-            glfwGetFramebufferSize(window, &width, &height);
+            glfwGetFramebufferSize(mWindow.handle(), &width, &height);
 
             VkExtent2D actualExtent = {
                 static_cast<uint32_t>(width),

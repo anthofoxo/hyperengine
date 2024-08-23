@@ -10,6 +10,7 @@ namespace hyperengine {
 			int width = 0, height = 0;
 			char const* title = nullptr;
 			bool maximized = false;
+			bool noClientApi = false;
 		};
 
 		constexpr Window() noexcept = default;
