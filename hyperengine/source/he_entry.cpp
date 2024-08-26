@@ -1799,9 +1799,18 @@ int main(int argc, char* argv[]) {
 	setupLogger();
 	hyperengine::rdoc::setup(true);
 
-	int option = tinyfd_messageBox("Vulkan Demo?", "Load vulkan demo", "yesno", "question", 1);
+	bool runVulkanDemo = false;
 
-	if (option == 1) {
+	{
+		lua_State* L = luaL_newstate();
+		luaL_dofile(L, "config.lua");
+		lua_getglobal(L, "RunVulkanDemo");
+		if (lua_isboolean(L, -1)) runVulkanDemo = lua_toboolean(L, -1);
+		lua_pop(L, 1);
+		lua_close(L);
+	}
+
+	if (runVulkanDemo) {
 		extern int vulkanMain();
 		vulkanMain();
 	}
